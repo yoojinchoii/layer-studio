@@ -26,7 +26,13 @@ Content-Type: application/octet-stream. Body: 원본 PNG 바이트. 키 설정 �
 {"width":1024,"height":1024,"engine":"see-through","layers":[{"label":"front_hair","x":120,"y":30,"image_b64":"<PNG base64>"}]}
 ```
 
-실패는 적절한 HTTP 상태와 `{"detail":"사용자가 읽을 수 있는 오류"}`로 반환합니다. 서버가 지원하지 않는 엔진은 400/404를 반환합니다. 클라이언트가 대기를 중단해도 GPU 실행 취소를 보장하지 않습니다. 장기 운영 시 작업 ID 기반 비동기 API, 취소, 비용 상한을 추가하세요.
+실패는 적절한 HTTP 상태와 `{"detail":"사용자가 읽을 수 있는 오류"}`로 반환합니다. 서버가 지원하지 않는 엔진은 400/404를 반환합니다.
+
+## Modal 비동기 작업
+
+오래 걸리는 작업은 POST에서 202와 `{"job_id":"...","status":"queued"}`를 반환합니다. 웹앱은 같은 키로 `GET /api/jobs/{job_id}`를 조회합니다. 실행 중에는 202, 완료 시 위 레이어 JSON과 200을 반환합니다. `DELETE /api/jobs/{job_id}`는 작업 취소를 요청합니다. 네트워크가 끊겨 취소 요청이 전달되지 않으면 서버에서 계속 실행될 수 있습니다.
+
+health에 `"engines":["see-through"], "async_jobs":true`를 추가하면 지원 엔진만 선택하고 작업 취소를 사용할 수 있습니다. 기존 동기 응답도 지원합니다. 연결 파일은 `{"url":"https://...modal.run","token":"..."}` 형식이며 웹앱에서 불러온 뒤 연결 확인을 누릅니다. 키는 서버용 비밀이며 공개 소스나 배포 파일에 포함하면 안 됩니다.
 
 ## 파일 처리 한계
 
