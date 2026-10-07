@@ -45,3 +45,7 @@ health에 `"engines":["see-through"], "async_jobs":true`를 추가하면 지원 
 ## 로컬 실행
 
 `npm install` 후 `npm run build`, `python3 -m http.server 5173 --directory dist`를 실행합니다. 배포 대상은 dist입니다. PNG/PSD 처리는 사용자 브라우저에서 이루어집니다.
+
+
+## 브라우저 후처리
+AI 분리 성공 후 선택적으로 경계 보정·기본 리깅 창을 엽니다. 이 단계는 서버 호출 없이 브라우저에서 실행됩니다. `src/rig-core.js`가 RGBA 정리, 의미별 파츠 배치, Spine 4.0.64 JSON 생성과 대기 동작을 담당합니다. 정면 전신 캐릭터용 휴리스틱이며 face/topwear 레이어를 요구합니다. 좌우 팔은 화면 위치로 판별합니다. 하체는 고정되며 IK·메쉬·관절 파츠 분할·인페인팅은 제공하지 않습니다.
