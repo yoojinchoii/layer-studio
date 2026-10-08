@@ -143,6 +143,13 @@ function halfWidth(layer,joint,dir){
   if(alpha(joint.x,joint.y)<64)return null;const perp={x:-dir.y,y:dir.x},max=Math.hypot(layer.width,layer.height),reach=sign=>{let k=0;while(k<max&&alpha(joint.x+perp.x*sign*(k+1),joint.y+perp.y*sign*(k+1))>=64)k++;return k;};
   return (reach(1)+reach(-1))/2;
 }
+// Chamfer distance (px) from each pixel to the nearest transparent pixel of a layer.
+const edgeCache=new WeakMap();
+function edgeDistance(layer){if(edgeCache.has(layer.data))return edgeCache.get(layer.data);const W=layer.width,H=layer.height,d=new Float32Array(W*H);
+  for(let i=0;i<W*H;i++)d[i]=layer.data[i*4+3]<64?0:1e6;
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){const i=y*W+x;if(!d[i])continue;let v=d[i];if(x>0)v=Math.min(v,d[i-1]+1);if(y>0)v=Math.min(v,d[i-W]+1);if(x>0&&y>0)v=Math.min(v,d[i-W-1]+1.414);if(x<W-1&&y>0)v=Math.min(v,d[i-W+1]+1.414);if(x===0||y===0||x===W-1||y===H-1)v=Math.min(v,1);d[i]=v;}
+  for(let y=H-1;y>=0;y--)for(let x=W-1;x>=0;x--){const i=y*W+x;let v=d[i];if(x<W-1)v=Math.min(v,d[i+1]+1);if(y<H-1)v=Math.min(v,d[i+W]+1);if(x<W-1&&y<H-1)v=Math.min(v,d[i+W+1]+1.414);if(x>0&&y<H-1)v=Math.min(v,d[i+W-1]+1.414);d[i]=v;}
+  edgeCache.set(layer.data,d);return d;}
 const LIMBS={arm:{joints:['arm','elbow','wrist'],names:['upper_arm','forearm','hand']},leg:{joints:['hip','knee','ankle'],names:['thigh','shin','foot']},feet:{joints:['ankle'],names:['shoe']}};
 // Cut one limb layer into rigid pieces on the plane through each joint. Every piece then gets a round
 // cap the width of the limb at that joint, so bending shows a continuous silhouette instead of a gap.
@@ -175,6 +182,10 @@ export function splitLimb(layer,rig,mode){
     const data=new Uint8ClampedArray(W*H*4),cov=new Float32Array(W*H),fill=new Uint8Array(W*H);let any=false;
     for(let i=0;i<W*H;i++)if(owner[i]===ci&&segOf[i]===seg){data.set(layer.data.subarray(i*4,i*4+4),i*4);any=true;}
     if(!any)continue;
+    // Root end of the limb (shoulder/hip): fade the outline into the body so a raised arm shows no hard sleeve edge.
+    if(seg===0&&kind!=='feet'){const j=c.pts[0],d=unit(c.pts[1].x-j.x,c.pts[1].y-j.y);if(d){const dist=edgeDistance(layer),f=Math.max(4,c.radii[0]*.35);
+      for(let i=0;i<W*H;i++){if(!data[i*4+3])continue;const x=i%W,y=(i-x)/W,along=(layer.x+x+.5-j.x)*d.x+(layer.y+y+.5-j.y)*d.y;if(along>=0)continue;
+        const t=clamp(dist[i]/f,0,1),edge=t*t*(3-2*t),w=clamp(-along/f,0,1);data[i*4+3]=Math.round(data[i*4+3]*(1-w+w*edge));}}}
     // Caps: [plane index, keep the side beyond (+1) or before (-1) the plane, fade?]
     const caps=kind==='feet'?[]:[[seg-1,-1,true],[seg,1,false]].filter(([k])=>k>=0&&k<c.planes.length);
     for(const [k,dir,fade]of caps){const [j,n]=c.planes[k],r=c.radii[k];
@@ -330,3 +341,18 @@ export const mul=(m,n)=>[m[0]*n[0]+m[2]*n[1],m[1]*n[0]+m[3]*n[1],m[0]*n[2]+m[2]*
 // Maps region image pixels (y down, origin top-left) to Spine world coordinates.
 export function regionMatrix(attachment,bone){const r=(attachment.rotation||0)*D2R,c=Math.cos(r),s=Math.sin(r);return mul(bone,mul([c,s,-s,c,attachment.x||0,attachment.y||0],[1,0,0,-1,-attachment.width/2,attachment.height/2]));}
 export function meshWorldVertices(attachment,skeleton,matrices){const out=[];let cursor=0;for(let i=0;i<attachment.uvs.length/2;i++){let x=0,y=0;const n=attachment.vertices[cursor++];for(let j=0;j<n;j++){const bone=skeleton.bones[attachment.vertices[cursor++]].name,lx=attachment.vertices[cursor++],ly=attachment.vertices[cursor++],w=attachment.vertices[cursor++],q=matrices[bone];x+=(q[0]*lx+q[2]*ly+q[4])*w;y+=(q[1]*lx+q[3]*ly+q[5])*w;}out.push([x,y]);}return out;}
+// Pixels of each layer that are hidden behind the layers in front of it (front-to-back order).
+// See-through invents these areas and often draws outlines there; they get redrawn as plain fill.
+export function hiddenMasks(layers,width,height,threshold=230){
+  const cover=new Uint8Array(width*height),masks=[];
+  for(const l of layers){
+    const mask=new Uint8Array(l.width*l.height);let count=0;
+    if(l.data&&l.visible!==false){
+      for(let y=0;y<l.height;y++)for(let x=0;x<l.width;x++){const gx=l.x+x,gy=l.y+y;if(gx<0||gy<0||gx>=width||gy>=height)continue;const i=y*l.width+x,a=l.data[i*4+3];if(!a)continue;
+        const g=gy*width+gx;if(cover[g]>=threshold){mask[i]=1;count++;}}
+      for(let y=0;y<l.height;y++)for(let x=0;x<l.width;x++){const gx=l.x+x,gy=l.y+y;if(gx<0||gy<0||gx>=width||gy>=height)continue;const a=l.data[(y*l.width+x)*4+3]*(l.opacity??1),g=gy*width+gx;cover[g]=255-Math.round((255-cover[g])*(255-a)/255);}
+    }
+    masks.push({mask,count});
+  }
+  return masks;
+}

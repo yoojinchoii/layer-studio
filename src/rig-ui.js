@@ -1,4 +1,4 @@
-import {cleanPixels,inferRig,refineRig,buildParts,applyPose,applyFill,centerJoints,attachProps,makeSkeleton,poseMatrices,boneLabels,meshWorldVertices,regionMatrix,mul,spineName,animationNames,addJoint,deleteJoint,setParent,boneOrder} from './rig-core.js';
+import {cleanPixels,inferRig,refineRig,buildParts,applyPose,applyFill,hiddenMasks,centerJoints,attachProps,makeSkeleton,poseMatrices,boneLabels,meshWorldVertices,regionMatrix,mul,spineName,animationNames,addJoint,deleteJoint,setParent,boneOrder} from './rig-core.js';
 import {packAtlas,encodePNG} from './spine-export.js';
 import {zipSync,strToU8} from 'fflate';
 import {writePsd} from 'ag-psd';
@@ -10,17 +10,33 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   const message=text=>{$('rigStatus').textContent=text;};
   const dirty=()=>{cached=null;cachedParts=null;};
   const assist=()=>state.server?.rigAssist?state.server:null;
-  const fillKey=()=>JSON.stringify([project.rig.points,project.rig.limbStyle,project.rig.modes,$('rigStrength').value,project.removed]);
+  const fillKey=()=>JSON.stringify([project.hiddenKey,project.rig.points,project.rig.limbStyle,project.rig.modes,$('rigStrength').value,project.removed]);
   async function call(path,body,type){const server=assist();const r=await fetch(server.url+path,{method:'POST',headers:{Authorization:`Bearer ${server.token}`,'Content-Type':type},body,signal:AbortSignal.timeout(300000)});if(!r.ok){let e;try{e=await r.json();}catch{}throw Error(e?.detail||`서버 오류 (${r.status})`);}return r.json();}
   // AI joints: pose keypoints from the server, then centred on the actual limb pixels.
   async function detectJoints(){if(!assist()||!project)return false;message('AI로 관절 위치를 찾는 중…');const data=await call('/api/pose',await canvasBlob(state.original),'application/octet-stream');const layers=project.layers.map((l,i)=>({...project.meta[i],data:pixels(l.canvas)}));const n=applyPose(project.rig,data.keypoints);if(!n){message('AI가 관절을 찾지 못해 모양 기반 추정을 사용합니다.');return false;}centerJoints(project.rig,layers);attachProps(project.rig,layers);dirty();fields();status();message(`AI가 관절 ${n}개를 찾았어요. 점이 어긋나면 드래그로 고쳐주세요.`);return true;}
   // AI redraw of joint caps (the hidden part of each piece behind its neighbour).
-  async function redraw(){if(!assist())throw Error('관절 다시 그리기는 서버 연결 후 사용할 수 있어요.');const key=fillKey();if(project.fill?.key===key)return;cachedParts=null;const todo=parts().filter(p=>p.fill);if(!todo.length)return;message(`AI가 관절 이음새 ${todo.length}곳을 다시 그리는 중…`);
-    const b64=async c=>(await new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result.slice(22));f.readAsDataURL(c);}));
-    const items=[];for(const p of todo){const m=canvas(p.width,p.height),img=new ImageData(p.width,p.height);for(let i=0;i<p.fill.length;i++)if(p.fill[i])img.data.set([255,255,255,255],i*4);m.getContext('2d').putImageData(img,0,0);items.push({image:await b64(await canvasBlob(p.canvas)),mask:await b64(await canvasBlob(m))});}
+  const b64=async c=>(await new Promise(r=>{const f=new FileReader();f.onload=()=>r(f.result.slice(22));f.readAsDataURL(c);}));
+  const maskCanvas=(mask,w,h)=>{const m=canvas(w,h),img=new ImageData(w,h);for(let i=0;i<mask.length;i++)if(mask[i])img.data.set([255,255,255,255],i*4);m.getContext('2d').putImageData(img,0,0);return m;};
+  // Areas of each layer hidden behind other layers: redraw them as a plain continuation of the visible
+  // part, so moving a piece reveals no invented outlines or hard edges.
+  async function redrawHidden(){
+    const key=`${project.ids}|${project.cleanVersion||0}`;if(project.hiddenKey===key)return;
+    const masks=hiddenMasks(project.layers.map((l,i)=>({...project.meta[i],data:pixels(l.canvas)})),project.rig.width,project.rig.height);
+    const todo=masks.map((m,i)=>({...m,i})).filter(m=>m.count>=40&&Math.max(project.layers[m.i].canvas.width,project.layers[m.i].canvas.height)<=1024);
+    if(todo.length){message(`AI가 가려진 부분 ${todo.length}개 레이어를 다시 그리는 중…`);
+      for(let start=0;start<todo.length;start+=16){const batch=todo.slice(start,start+16),items=[];
+        for(const m of batch){const c=project.layers[m.i].canvas;items.push({image:await b64(await canvasBlob(c)),mask:await b64(await canvasBlob(maskCanvas(m.mask,c.width,c.height)))});}
+        const res=await call('/api/inpaint',JSON.stringify({items}),'application/json');
+        for(const [k,m]of batch.entries()){const l=project.layers[m.i],bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(res.images[k]),c=>c.charCodeAt(0))],{type:'image/png'})),tmp=canvas(l.canvas.width,l.canvas.height);tmp.getContext('2d').drawImage(bitmap,0,0);bitmap.close();
+          const rgb=tmp.getContext('2d').getImageData(0,0,tmp.width,tmp.height).data,c=canvas(l.canvas.width,l.canvas.height),ctx=c.getContext('2d'),img=ctx.createImageData(c.width,c.height);img.data.set(pixels(l.canvas));
+          for(let i=0;i<m.mask.length;i++)if(m.mask[i]){img.data[i*4]=rgb[i*4];img.data[i*4+1]=rgb[i*4+1];img.data[i*4+2]=rgb[i*4+2];}ctx.putImageData(img,0,0);project.layers[m.i]={...l,canvas:c};}}}
+    project.hiddenKey=key;dirty();
+  }
+  async function redraw(){if(!assist())throw Error('다시 그리기는 서버 연결 후 사용할 수 있어요.');await redrawHidden();const key=fillKey();if(project.fill?.key===key)return;cachedParts=null;const todo=parts().filter(p=>p.fill);if(!todo.length){draw();message('가려진 부분을 AI로 다시 그렸어요.');return;}message(`AI가 관절 이음새 ${todo.length}곳을 다시 그리는 중…`);
+    const items=[];for(const p of todo)items.push({image:await b64(await canvasBlob(p.canvas)),mask:await b64(await canvasBlob(maskCanvas(p.fill,p.width,p.height)))});
     const res=await call('/api/inpaint',JSON.stringify({items}),'application/json'),images={};
     for(const [k,p]of todo.entries()){const bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(res.images[k]),c=>c.charCodeAt(0))],{type:'image/png'}));const c=canvas(p.width,p.height);c.getContext('2d').drawImage(bitmap,0,0);bitmap.close();images[p.slot]=c.getContext('2d').getImageData(0,0,p.width,p.height).data;}
-    project.fill={key,images};dirty();draw();status();message('관절 이음새를 AI로 다시 그렸어요.');}
+    project.fill={key,images};dirty();draw();status();message('가려진 부분과 관절 이음새를 AI로 다시 그렸어요.');}
   const remember=()=>{history.push(JSON.stringify(project.rig));if(history.length>40)history.shift();$('rigUndo').disabled=false;};
   const poseMode=()=>$('rigMode').value==='pose';
   const selected=()=>$('rigBone').value;
@@ -47,7 +63,7 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   }
   async function cleanup(){
     stop();processing=true;$('rigProjectOpen').disabled=true;const next=[];let removed=0;for(const id of ['rigClean','rigSave','rigApply','rigProjectSave'])$(id).disabled=true;
-    try{for(const l of project.source){const c=canvas(l.canvas.width,l.canvas.height),ctx=c.getContext('2d');ctx.drawImage(l.canvas,0,0);const pixels=ctx.getImageData(0,0,c.width,c.height),r=cleanPixels(pixels.data,c.width,c.height,Number($('rigStrength').value));pixels.data.set(r.data);ctx.putImageData(pixels,0,0);removed+=r.removed;next.push({...l,canvas:c});await new Promise(r=>setTimeout(r,0));}project.layers=next;project.removed=removed;dirty();status();draw();}
+    try{for(const l of project.source){const c=canvas(l.canvas.width,l.canvas.height),ctx=c.getContext('2d');ctx.drawImage(l.canvas,0,0);const pixels=ctx.getImageData(0,0,c.width,c.height),r=cleanPixels(pixels.data,c.width,c.height,Number($('rigStrength').value));pixels.data.set(r.data);ctx.putImageData(pixels,0,0);removed+=r.removed;next.push({...l,canvas:c});await new Promise(r=>setTimeout(r,0));}project.layers=next;project.removed=removed;project.cleanVersion=(project.cleanVersion||0)+1;dirty();status();draw();}
     finally{processing=false;$('rigProjectOpen').disabled=state.busy;for(const id of ['rigClean','rigSave','rigApply','rigProjectSave'])$(id).disabled=false;}
   }
   // Spine parts derived from the cleaned layers and the current joints; rebuilt whenever either changes.
