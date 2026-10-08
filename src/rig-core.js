@@ -43,17 +43,17 @@ export function cleanPixels(data,w,h,strength=1){
 }
 // Internal joint ids keep screen sides (left = screen left). Spine names use the character's side,
 // so the screen-left arm becomes the character's right arm (_R), matching See-through labels.
-export const boneLabels={root:'전체 기준',body:'골반',chest:'가슴',neck:'목',head:'머리',hair:'머리카락',arm_left:'오른 어깨 (화면 왼쪽)',elbow_left:'오른 팔꿈치 (화면 왼쪽)',wrist_left:'오른 손목 (화면 왼쪽)',arm_right:'왼 어깨 (화면 오른쪽)',elbow_right:'왼 팔꿈치 (화면 오른쪽)',wrist_right:'왼 손목 (화면 오른쪽)',hip_left:'오른 고관절 (화면 왼쪽)',knee_left:'오른 무릎 (화면 왼쪽)',ankle_left:'오른 발목 (화면 왼쪽)',hip_right:'왼 고관절 (화면 오른쪽)',knee_right:'왼 무릎 (화면 오른쪽)',ankle_right:'왼 발목 (화면 오른쪽)'};
-export const spineNames={root:'root',body:'hip',chest:'torso',neck:'neck',head:'head',hair:'hair',arm_left:'upper_arm_R',elbow_left:'forearm_R',wrist_left:'hand_R',hip_left:'thigh_R',knee_left:'shin_R',ankle_left:'foot_R',arm_right:'upper_arm_L',elbow_right:'forearm_L',wrist_right:'hand_L',hip_right:'thigh_L',knee_right:'shin_L',ankle_right:'foot_L'};
+export const boneLabels={root:'전체 기준',body:'허리 (상·하체 기준)',upper:'상체',pelvis:'하체',chest:'가슴',neck:'목',head:'머리',hair:'머리카락',arm_left:'오른 어깨 (화면 왼쪽)',elbow_left:'오른 팔꿈치 (화면 왼쪽)',wrist_left:'오른 손목 (화면 왼쪽)',arm_right:'왼 어깨 (화면 오른쪽)',elbow_right:'왼 팔꿈치 (화면 오른쪽)',wrist_right:'왼 손목 (화면 오른쪽)',hip_left:'오른 고관절 (화면 왼쪽)',knee_left:'오른 무릎 (화면 왼쪽)',ankle_left:'오른 발목 (화면 왼쪽)',hip_right:'왼 고관절 (화면 오른쪽)',knee_right:'왼 무릎 (화면 오른쪽)',ankle_right:'왼 발목 (화면 오른쪽)'};
+export const spineNames={root:'root',body:'hip',upper:'upper_body',pelvis:'lower_body',chest:'torso',neck:'neck',head:'head',hair:'hair',arm_left:'upper_arm_R',elbow_left:'forearm_R',wrist_left:'hand_R',hip_left:'thigh_R',knee_left:'shin_R',ankle_left:'foot_R',arm_right:'upper_arm_L',elbow_right:'forearm_L',wrist_right:'hand_L',hip_right:'thigh_L',knee_right:'shin_L',ankle_right:'foot_L'};
 export const spineName=id=>spineNames[id]||id;
-const defaultParents={body:'root',chest:'body',neck:'chest',head:'neck',hair:'head',arm_left:'chest',elbow_left:'arm_left',wrist_left:'elbow_left',arm_right:'chest',elbow_right:'arm_right',wrist_right:'elbow_right',hip_left:'body',knee_left:'hip_left',ankle_left:'knee_left',hip_right:'body',knee_right:'hip_right',ankle_right:'knee_right'};
+const defaultParents={body:'root',upper:'body',pelvis:'body',chest:'upper',neck:'chest',head:'neck',hair:'head',arm_left:'chest',elbow_left:'arm_left',wrist_left:'elbow_left',arm_right:'chest',elbow_right:'arm_right',wrist_right:'elbow_right',hip_left:'pelvis',knee_left:'hip_left',ankle_left:'knee_left',hip_right:'pelvis',knee_right:'hip_right',ankle_right:'knee_right'};
 const partBones={upper_arm:'arm',forearm:'elbow',hand:'wrist',thigh:'hip',shin:'knee',foot:'ankle',shoe:'ankle'};
 export function inferRig(layers,width,height){
   const find=re=>layers.find(l=>re.test(l.name.toLowerCase())),center=l=>l.x+l.width/2;
   const face=find(/^(face|얼굴)$/),shirt=find(/^(topwear|상의)$/),pants=find(/^(bottomwear|하의)$/),legs=find(/legwear|다리/),feet=find(/footwear|신발/);
   const cx=face?center(face):width*.5,shoulderY=shirt?shirt.y+shirt.height*.14:height*.25;
   const body={x:pants?center(pants):cx,y:pants?pants.y+8:height*.48};
-  const points={root:{x:width/2,y:height},body,chest:{x:cx,y:shoulderY+height*.06},neck:{x:cx,y:shirt?shirt.y:height*.2},head:{x:cx,y:face?face.y+face.height*.8:height*.16},hair:{x:cx,y:face?face.y+face.height*.18:height*.08}};
+  const points={root:{x:width/2,y:height},body,upper:{x:body.x,y:body.y-height*.015},pelvis:{x:body.x,y:body.y+height*.015},chest:{x:cx,y:shoulderY+height*.06},neck:{x:cx,y:shirt?shirt.y:height*.2},head:{x:cx,y:face?face.y+face.height*.8:height*.16},hair:{x:cx,y:face?face.y+face.height*.18:height*.08}};
   for(const side of ['left','right']){
     const sign=side==='left'?-1:1,arm=layers.find(l=>/handwear|^arm|팔/.test(l.name.toLowerCase())&&(center(l)<cx)===(side==='left'));
     const shoulder={x:arm?arm.x+arm.width*(side==='left'?.83:.17):cx+sign*width*.09,y:arm?arm.y+arm.height*.08:shoulderY};
@@ -66,7 +66,7 @@ export function inferRig(layers,width,height){
   }
   const assignments=layers.map(l=>{const n=l.name.toLowerCase(),part=n.match(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_([rl])(?:_\d+)?$/);
     if(part)return `${partBones[part[1]]}_${part[2]==='r'?'left':'right'}`;
-    if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/topwear|상의/.test(n))return 'chest';if(/handwear|^arm|팔/.test(n))return center(l)<cx?'arm_left':'arm_right';if(/bottomwear|하의/.test(n))return 'body';return 'root';});
+    if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/topwear|상의/.test(n))return 'chest';if(/handwear|^arm|팔/.test(n))return center(l)<cx?'arm_left':'arm_right';if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
   const modes=layers.map((l,i)=>{const n=l.name.toLowerCase();if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
   return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,limbStyle:'cutout',ik:true};
 }
@@ -120,7 +120,7 @@ export function setParent(rig,name,parent){if(name==='root'||name===parent||!rig
 export function addJoint(rig,label,parent){if(Object.keys(rig.points).length>=64)throw Error('관절은 최대 64개까지 추가할 수 있어요.');let n=1;while(rig.points[`joint_${n}`])n++;const id=`joint_${n}`,p=rig.points[parent]||rig.points.body;rig.points[id]={x:clamp(p.x+30,0,rig.width),y:clamp(p.y+30,0,rig.height)};rig.parents[id]=rig.points[parent]?parent:'body';rig.labels[id]=label.trim()||`추가 관절 ${n}`;return id;}
 export function deleteJoint(rig,id){if(boneLabels[id])throw Error('기본 관절은 삭제할 수 없어요.');const parent=rig.parents[id];for(const k in rig.parents)if(rig.parents[k]===id)rig.parents[k]=parent;rig.assignments=rig.assignments.map(x=>x===id?parent:x);delete rig.points[id];delete rig.parents[id];delete rig.labels[id];delete rig.pose[id];}
 // Setup pose: every limb bone points at its next joint so Spine shows real bone lengths and IK can bend them.
-function nextJoint(id){const m=id.match(/^(arm|elbow|hip|knee)_(left|right)$/);if(m)return `${{arm:'elbow',elbow:'wrist',hip:'knee',knee:'ankle'}[m[1]]}_${m[2]}`;return {body:'chest',chest:'neck',neck:'head'}[id];}
+function nextJoint(id){const m=id.match(/^(arm|elbow|hip|knee)_(left|right)$/);if(m)return `${{arm:'elbow',elbow:'wrist',hip:'knee',knee:'ankle'}[m[1]]}_${m[2]}`;return {body:'chest',upper:'chest',chest:'neck',neck:'head'}[id];}
 export function setupPose(rig){
   const P=rig.points,root=P.root,order=boneOrder(rig),world={},s=rig.height/768;
   const at=id=>({x:P[id].x-root.x,y:root.y-P[id].y});
@@ -129,6 +129,7 @@ export function setupPose(rig){
     if(id!=='root'){
       const parent=world[rig.parents[id]],to=next&&P[next]?at(next):null,dir=to&&unit(to.x-pos.x,to.y-pos.y);
       if(dir){angle=Math.atan2(dir.y,dir.x)/D2R;length=Math.hypot(to.x-pos.x,to.y-pos.y);}
+      else if(id==='pelvis'){angle=-90;const hips=['hip_left','hip_right'].filter(h=>P[h]);length=Math.max(10*s,hips.length?hips.reduce((n,h)=>n+P[h].y,0)/hips.length-P.pelvis.y:30*s);}
       else if(id==='head'||id==='hair'){angle=90;length=id==='head'&&P.hair?Math.max(10*s,Math.hypot(P.hair.x-P.head.x,P.hair.y-P.head.y)*1.6):20*s;}
       else{angle=parent.angle;length=Math.max(10*s,parent.length*.45);}
     }
@@ -368,3 +369,12 @@ export function matchOriginal(layers,original){
       cover[g]=255-Math.round((255-cover[g])*(255-a*op)/255);}}
   return changed;
 }
+// Older projects had no separate upper/lower body bones: insert them under the waist.
+export function upgradeRig(rig){
+  const P=rig.points;if(!P?.body||P.upper&&P.pelvis)return rig;const h=rig.height||768;
+  if(!P.upper){P.upper={x:P.body.x,y:Math.max(0,P.body.y-h*.015)};rig.parents.upper='body';rig.labels.upper=boneLabels.upper;for(const k in rig.parents)if(k!=='upper'&&k!=='pelvis'&&rig.parents[k]==='body'&&!/^hip_/.test(k))rig.parents[k]='upper';}
+  if(!P.pelvis){P.pelvis={x:P.body.x,y:Math.min(h,P.body.y+h*.015)};rig.parents.pelvis='body';rig.labels.pelvis=boneLabels.pelvis;for(const k of ['hip_left','hip_right'])if(rig.parents[k]==='body')rig.parents[k]='pelvis';rig.assignments=rig.assignments.map(a=>a==='body'?'pelvis':a);}
+  return rig;
+}
+// A joint the user placed on the canvas.
+export function addJointAt(rig,label,parent,x,y){const id=addJoint(rig,label,parent);rig.points[id]={x:clamp(x,0,rig.width),y:clamp(y,0,rig.height)};return id;}
