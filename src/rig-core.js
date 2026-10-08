@@ -1,5 +1,9 @@
 // Pure pixel/rig operations shared by the browser and artifact verification.
 const round=n=>Math.round(n*10000)/10000;
+const D2R=Math.PI/180;
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const norm=a=>{a=((a+180)%360+360)%360-180;return a===-180?180:a;};
+const unit=(x,y)=>{const l=Math.hypot(x,y);return l>1e-6?{x:x/l,y:y/l}:null;};
 export function cleanPixels(data,w,h,strength=1){
   const out=new Uint8ClampedArray(data), n=w*h;
   if(!strength)return {data:out,removed:0};
@@ -37,9 +41,13 @@ export function cleanPixels(data,w,h,strength=1){
   }
   return {data:out,removed};
 }
-export const boneLabels={root:'전체 기준',body:'골반',chest:'가슴',neck:'목',head:'머리',hair:'머리카락',arm_left:'왼쪽 어깨',elbow_left:'왼쪽 팔꿈치',wrist_left:'왼쪽 손목',arm_right:'오른쪽 어깨',elbow_right:'오른쪽 팔꿈치',wrist_right:'오른쪽 손목',hip_left:'왼쪽 고관절',knee_left:'왼쪽 무릎',ankle_left:'왼쪽 발목',hip_right:'오른쪽 고관절',knee_right:'오른쪽 무릎',ankle_right:'오른쪽 발목'};
+// Internal joint ids keep screen sides (left = screen left). Spine names use the character's side,
+// so the screen-left arm becomes the character's right arm (_R), matching See-through labels.
+export const boneLabels={root:'전체 기준',body:'골반',chest:'가슴',neck:'목',head:'머리',hair:'머리카락',arm_left:'오른 어깨 (화면 왼쪽)',elbow_left:'오른 팔꿈치 (화면 왼쪽)',wrist_left:'오른 손목 (화면 왼쪽)',arm_right:'왼 어깨 (화면 오른쪽)',elbow_right:'왼 팔꿈치 (화면 오른쪽)',wrist_right:'왼 손목 (화면 오른쪽)',hip_left:'오른 고관절 (화면 왼쪽)',knee_left:'오른 무릎 (화면 왼쪽)',ankle_left:'오른 발목 (화면 왼쪽)',hip_right:'왼 고관절 (화면 오른쪽)',knee_right:'왼 무릎 (화면 오른쪽)',ankle_right:'왼 발목 (화면 오른쪽)'};
+export const spineNames={root:'root',body:'hip',chest:'torso',neck:'neck',head:'head',hair:'hair',arm_left:'upper_arm_R',elbow_left:'forearm_R',wrist_left:'hand_R',hip_left:'thigh_R',knee_left:'shin_R',ankle_left:'foot_R',arm_right:'upper_arm_L',elbow_right:'forearm_L',wrist_right:'hand_L',hip_right:'thigh_L',knee_right:'shin_L',ankle_right:'foot_L'};
+export const spineName=id=>spineNames[id]||id;
 const defaultParents={body:'root',chest:'body',neck:'chest',head:'neck',hair:'head',arm_left:'chest',elbow_left:'arm_left',wrist_left:'elbow_left',arm_right:'chest',elbow_right:'arm_right',wrist_right:'elbow_right',hip_left:'body',knee_left:'hip_left',ankle_left:'knee_left',hip_right:'body',knee_right:'hip_right',ankle_right:'knee_right'};
-const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const partBones={upper_arm:'arm',forearm:'elbow',hand:'wrist',thigh:'hip',shin:'knee',foot:'ankle',shoe:'ankle'};
 export function inferRig(layers,width,height){
   const find=re=>layers.find(l=>re.test(l.name.toLowerCase())),center=l=>l.x+l.width/2;
   const face=find(/^(face|얼굴)$/),shirt=find(/^(topwear|상의)$/),pants=find(/^(bottomwear|하의)$/),legs=find(/legwear|다리/),feet=find(/footwear|신발/);
@@ -56,9 +64,53 @@ export function inferRig(layers,width,height){
     const ankle={x:feet?center(feet)+sign*feet.width*.33:cx+sign*width*.08,y:feet?feet.y+feet.height*.22:height*.88};
     points[`ankle_${side}`]=ankle;points[`knee_${side}`]={x:(points[`hip_${side}`].x+ankle.x)/2,y:legs?legs.y+legs.height*.49:height*.68};
   }
-  const assignments=layers.map(l=>{const n=l.name.toLowerCase();if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/topwear|상의/.test(n))return 'chest';if(/handwear|^arm|팔/.test(n))return center(l)<cx?'arm_left':'arm_right';if(/bottomwear|하의/.test(n))return 'body';return 'root';});
-  const modes=layers.map((l,i)=>/handwear|^arm|팔/.test(l.name.toLowerCase())?assignments[i]:/legwear|다리/.test(l.name.toLowerCase())?'legs':/footwear|신발/.test(l.name.toLowerCase())?'feet':'rigid');
-  return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height};
+  const assignments=layers.map(l=>{const n=l.name.toLowerCase(),part=n.match(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_([rl])(?:_\d+)?$/);
+    if(part)return `${partBones[part[1]]}_${part[2]==='r'?'left':'right'}`;
+    if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/topwear|상의/.test(n))return 'chest';if(/handwear|^arm|팔/.test(n))return center(l)<cx?'arm_left':'arm_right';if(/bottomwear|하의/.test(n))return 'body';return 'root';});
+  const modes=layers.map((l,i)=>{const n=l.name.toLowerCase();if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
+  return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,limbStyle:'cutout',ik:true};
+}
+// Pixel statistics for opaque pixels of a layer, in image coordinates (pixel centres).
+function opaquePoints(layer,keep=()=>true,stride=1){
+  const pts=[];for(let y=0;y<layer.height;y+=stride)for(let x=0;x<layer.width;x+=stride){if(layer.data[(y*layer.width+x)*4+3]<128)continue;const px=layer.x+x+.5,py=layer.y+y+.5;if(keep(px,py))pts.push([px,py]);}
+  return pts;
+}
+function principalAxis(pts){
+  let mx=0,my=0;for(const [x,y]of pts){mx+=x;my+=y;}mx/=pts.length;my/=pts.length;
+  let xx=0,yy=0,xy=0;for(const [x,y]of pts){xx+=(x-mx)**2;yy+=(y-my)**2;xy+=(x-mx)*(y-my);}
+  const t=.5*Math.atan2(2*xy,xx-yy),dir={x:Math.cos(t),y:Math.sin(t)};let lo=Infinity,hi=-Infinity;
+  for(const [x,y]of pts){const s=(x-mx)*dir.x+(y-my)*dir.y;lo=Math.min(lo,s);hi=Math.max(hi,s);}
+  return {mx,my,dir,lo,hi};
+}
+// Centroid of the cross-section at fraction f between two axis ends, so joints sit mid-limb.
+function sliceAt(pts,axis,from,f){
+  const sgn=from==='lo'?1:-1,start=from==='lo'?axis.lo:axis.hi,len=axis.hi-axis.lo,t=start+sgn*f*len,band=len*.03+1;let sx=0,sy=0,n=0;
+  for(const [x,y]of pts){const s=(x-axis.mx)*axis.dir.x+(y-axis.my)*axis.dir.y;if(Math.abs(s-t)<=band){sx+=x;sy+=y;n++;}}
+  return n?{x:sx/n,y:sy/n}:{x:axis.mx+axis.dir.x*t,y:axis.my+axis.dir.y*t};
+}
+// Re-estimate limb joints from the actual arm/leg/shoe pixels (bounding boxes alone miss bent or tilted limbs).
+export function refineRig(rig,layers){
+  const P=rig.points,set=(id,p)=>{if(P[id]&&p)P[id]={x:clamp(p.x,0,rig.width),y:clamp(p.y,0,rig.height)};};
+  const sideOf=x=>x<P.body.x?'left':'right';
+  for(const pass of ['limbs','feet'])layers.forEach((l,i)=>{const mode=rig.modes[i];if(!l.data)return;
+    if(pass==='limbs'&&(mode==='arm_left'||mode==='arm_right')){
+      const side=mode.slice(4),pts=opaquePoints(l,()=>true,2);if(pts.length<20)return;const axis=principalAxis(pts),c=P.chest;
+      const lo={x:axis.mx+axis.dir.x*axis.lo,y:axis.my+axis.dir.y*axis.lo},hi={x:axis.mx+axis.dir.x*axis.hi,y:axis.my+axis.dir.y*axis.hi};
+      const from=Math.hypot(lo.x-c.x,lo.y-c.y)<=Math.hypot(hi.x-c.x,hi.y-c.y)?'lo':'hi';
+      set(`arm_${side}`,sliceAt(pts,axis,from,.07));set(`elbow_${side}`,sliceAt(pts,axis,from,.45));set(`wrist_${side}`,sliceAt(pts,axis,from,.79));
+    }
+    if(pass==='limbs'&&mode==='legs')for(const side of ['left','right']){
+      const pts=opaquePoints(l,x=>sideOf(x)===side,2);if(pts.length<20)continue;const axis=principalAxis(pts),from=axis.my+axis.dir.y*axis.lo<axis.my+axis.dir.y*axis.hi?'lo':'hi';
+      set(`hip_${side}`,sliceAt(pts,axis,from,.05));set(`knee_${side}`,sliceAt(pts,axis,from,.5));set(`ankle_${side}`,sliceAt(pts,axis,from,.97));
+    }
+    if(pass==='feet'&&mode==='feet')for(const side of ['left','right']){
+      const pts=opaquePoints(l,x=>sideOf(x)===side,1);if(pts.length<20)continue;let top=Infinity,bottom=-Infinity;for(const [,y]of pts){top=Math.min(top,y);bottom=Math.max(bottom,y);}
+      const y=top+(bottom-top)*.35,band=pts.filter(p=>Math.abs(p[1]-y)<=Math.max(2,(bottom-top)*.05));if(!band.length)continue;
+      set(`ankle_${side}`,{x:band.reduce((s,p)=>s+p[0],0)/band.length,y});
+    }
+  });
+  centerJoints(rig,layers);attachProps(rig,layers);
+  return rig;
 }
 export function boneOrder(rig){
   const order=[],visiting=new Set(),done=new Set();function visit(name){if(done.has(name))return;if(!rig.points[name]||visiting.has(name))throw Error('뼈대 연결이 순환하거나 부모 관절이 없습니다.');visiting.add(name);const parent=rig.parents[name];if(parent)visit(parent);visiting.delete(name);done.add(name);order.push(name);}
@@ -67,47 +119,214 @@ export function boneOrder(rig){
 export function setParent(rig,name,parent){if(name==='root'||name===parent||!rig.points[parent])throw Error('부모 관절을 확인해주세요.');const old=rig.parents[name];rig.parents[name]=parent;try{boneOrder(rig);}catch(e){rig.parents[name]=old;throw e;}}
 export function addJoint(rig,label,parent){if(Object.keys(rig.points).length>=64)throw Error('관절은 최대 64개까지 추가할 수 있어요.');let n=1;while(rig.points[`joint_${n}`])n++;const id=`joint_${n}`,p=rig.points[parent]||rig.points.body;rig.points[id]={x:clamp(p.x+30,0,rig.width),y:clamp(p.y+30,0,rig.height)};rig.parents[id]=rig.points[parent]?parent:'body';rig.labels[id]=label.trim()||`추가 관절 ${n}`;return id;}
 export function deleteJoint(rig,id){if(boneLabels[id])throw Error('기본 관절은 삭제할 수 없어요.');const parent=rig.parents[id];for(const k in rig.parents)if(rig.parents[k]===id)rig.parents[k]=parent;rig.assignments=rig.assignments.map(x=>x===id?parent:x);delete rig.points[id];delete rig.parents[id];delete rig.labels[id];delete rig.pose[id];}
-function chainInfo(rig,names,x,y){let best={distance:Infinity,t:0},total=0;const lengths=[];
-  for(let i=0;i<names.length-1;i++){const a=rig.points[names[i]],b=rig.points[names[i+1]],dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,u=clamp(((x-a.x)*dx+(y-a.y)*dy)/(len*len),0,1),distance=Math.hypot(x-a.x-u*dx,y-a.y-u*dy);if(distance<best.distance)best={distance,t:total+u*len};lengths.push(len);total+=len;}
+// Setup pose: every limb bone points at its next joint so Spine shows real bone lengths and IK can bend them.
+function nextJoint(id){const m=id.match(/^(arm|elbow|hip|knee)_(left|right)$/);if(m)return `${{arm:'elbow',elbow:'wrist',hip:'knee',knee:'ankle'}[m[1]]}_${m[2]}`;return {body:'chest',chest:'neck',neck:'head'}[id];}
+export function setupPose(rig){
+  const P=rig.points,root=P.root,order=boneOrder(rig),world={},s=rig.height/768;
+  const at=id=>({x:P[id].x-root.x,y:root.y-P[id].y});
+  for(const id of order){
+    const pos=at(id),next=nextJoint(id);let angle=0,length=0;
+    if(id!=='root'){
+      const parent=world[rig.parents[id]],to=next&&P[next]?at(next):null,dir=to&&unit(to.x-pos.x,to.y-pos.y);
+      if(dir){angle=Math.atan2(dir.y,dir.x)/D2R;length=Math.hypot(to.x-pos.x,to.y-pos.y);}
+      else if(id==='head'||id==='hair'){angle=90;length=id==='head'&&P.hair?Math.max(10*s,Math.hypot(P.hair.x-P.head.x,P.hair.y-P.head.y)*1.6):20*s;}
+      else{angle=parent.angle;length=Math.max(10*s,parent.length*.45);}
+    }
+    world[id]={...pos,angle,length};
+  }
+  return {order,world};
+}
+function toLocal(world,id,x,y){const q=world[id],r=-q.angle*D2R,dx=x-q.x,dy=y-q.y;return [dx*Math.cos(r)-dy*Math.sin(r),dx*Math.sin(r)+dy*Math.cos(r)];}
+// Approximate half thickness of a limb at a joint, measured across the limb direction.
+function halfWidth(layer,joint,dir){
+  const alpha=(x,y)=>{const px=Math.floor(x-layer.x),py=Math.floor(y-layer.y);return px<0||py<0||px>=layer.width||py>=layer.height?0:layer.data[(py*layer.width+px)*4+3];};
+  if(alpha(joint.x,joint.y)<64)return null;const perp={x:-dir.y,y:dir.x},max=Math.hypot(layer.width,layer.height),reach=sign=>{let k=0;while(k<max&&alpha(joint.x+perp.x*sign*(k+1),joint.y+perp.y*sign*(k+1))>=64)k++;return k;};
+  return (reach(1)+reach(-1))/2;
+}
+const LIMBS={arm:{joints:['arm','elbow','wrist'],names:['upper_arm','forearm','hand']},leg:{joints:['hip','knee','ankle'],names:['thigh','shin','foot']},feet:{joints:['ankle'],names:['shoe']}};
+// Cut one limb layer into rigid pieces on the plane through each joint. Every piece then gets a round
+// cap the width of the limb at that joint, so bending shows a continuous silhouette instead of a gap.
+// The cap of the front (distal) piece fades out, softening the seam. Cap pixels are flagged in `fill`
+// so the server can redraw them (the original pixels there belong to the neighbouring piece).
+export function splitLimb(layer,rig,mode){
+  const kind=mode==='arm_left'||mode==='arm_right'?'arm':mode==='legs'?'leg':mode==='feet'?'feet':null;if(!kind||!layer.data)return null;
+  const P=rig.points,{joints,names}=LIMBS[kind],sides=kind==='arm'?[mode.slice(4)]:['left','right'],W=layer.width,H=layer.height;
+  const chains=[];
+  for(const side of sides){
+    const ids=joints.map(j=>`${j}_${side}`);if(ids.some(id=>!P[id]))return null;const pts=ids.map(id=>P[id]);
+    const guide=kind==='feet'?[P[`knee_${side}`]||{x:pts[0].x,y:pts[0].y-1},pts[0]]:pts,chain={side,ids,pts,guide,planes:[],radii:[]};
+    if(kind!=='feet'){
+      const d0=unit(pts[1].x-pts[0].x,pts[1].y-pts[0].y)||{x:0,y:1},d1=unit(pts[2].x-pts[1].x,pts[2].y-pts[1].y)||d0,n1=unit(d0.x+d1.x,d0.y+d1.y)||d1;
+      const shortest=Math.min(Math.hypot(pts[1].x-pts[0].x,pts[1].y-pts[0].y),Math.hypot(pts[2].x-pts[1].x,pts[2].y-pts[1].y));
+      chain.planes=[[pts[1],n1],[pts[2],d1]];
+      chain.radii=chain.planes.map(([j,n])=>{const h=halfWidth(layer,j,n);return clamp(h===null?shortest*.12:h,3,Math.max(3,shortest*.45));});
+    }
+    chains.push(chain);
+  }
+  const owner=new Int16Array(W*H).fill(-1),segOf=new Int8Array(W*H);
+  for(let y=0;y<H;y++)for(let x=0;x<W;x++){
+    const i=y*W+x;if(!layer.data[i*4+3])continue;const px=layer.x+x+.5,py=layer.y+y+.5;
+    let ci=0;if(chains.length>1){let best=Infinity;chains.forEach((c,k)=>{const d=chainInfo(c.guide,px,py).distance;if(d<best){best=d;ci=k;}});}
+    const c=chains[ci];owner[i]=ci;if(kind==='feet')continue;
+    const side=([j,n])=>(px-j.x)*n.x+(py-j.y)*n.y;segOf[i]=side(c.planes[0])<0?0:side(c.planes[1])<0?1:2;
+  }
+  const parts=[];
+  chains.forEach((c,ci)=>{for(let seg=joints.length-1;seg>=0;seg--){
+    const data=new Uint8ClampedArray(W*H*4),cov=new Float32Array(W*H),fill=new Uint8Array(W*H);let any=false;
+    for(let i=0;i<W*H;i++)if(owner[i]===ci&&segOf[i]===seg){data.set(layer.data.subarray(i*4,i*4+4),i*4);any=true;}
+    if(!any)continue;
+    // Caps: [plane index, keep the side beyond (+1) or before (-1) the plane, fade?]
+    const caps=kind==='feet'?[]:[[seg-1,-1,true],[seg,1,false]].filter(([k])=>k>=0&&k<c.planes.length);
+    for(const [k,dir,fade]of caps){const [j,n]=c.planes[k],r=c.radii[k];
+      for(let y=Math.max(0,Math.floor(j.y-layer.y-r-1));y<=Math.min(H-1,Math.ceil(j.y-layer.y+r+1));y++)for(let x=Math.max(0,Math.floor(j.x-layer.x-r-1));x<=Math.min(W-1,Math.ceil(j.x-layer.x+r+1));x++){
+        // Caps stay inside the limb's original silhouette: nothing hidden exists outside it.
+        const i=y*W+x;if(owner[i]!==ci||segOf[i]===seg)continue;const px=layer.x+x+.5,py=layer.y+y+.5,along=((px-j.x)*n.x+(py-j.y)*n.y)*dir;if(along<0)continue;
+        let a=clamp(r-Math.hypot(px-j.x,py-j.y)+.5,0,1);if(fade){const t=along/r;a*=1-clamp((t-.3)/.7,0,1)**2*(3-2*clamp((t-.3)/.7,0,1));}
+        a*=layer.data[i*4+3]/255;if(a<=cov[i])continue;cov[i]=a;fill[i]=1;
+        data.set([layer.data[i*4],layer.data[i*4+1],layer.data[i*4+2],Math.round(a*255)],i*4);
+      }}
+    let x0=W,y0=H,x1=-1,y1=-1;for(let i=0;i<W*H;i++)if(data[i*4+3]||fill[i]){const x=i%W,y=(i-x)/W;x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);}
+    const w=x1-x0+1,h=y1-y0+1,crop=new Uint8ClampedArray(w*h*4),cropFill=new Uint8Array(w*h),cropCov=new Float32Array(w*h);
+    for(let y=0;y<h;y++){crop.set(data.subarray(((y+y0)*W+x0)*4,((y+y0)*W+x1+1)*4),y*w*4);cropFill.set(fill.subarray((y+y0)*W+x0,(y+y0)*W+x1+1),y*w);cropCov.set(cov.subarray((y+y0)*W+x0,(y+y0)*W+x1+1),y*w);}
+    const part={name:`${names[seg]}_${c.side==='left'?'R':'L'}`,x:layer.x+x0,y:layer.y+y0,width:w,height:h,data:crop,bone:c.ids[seg],mode:'rigid',opacity:layer.opacity??1,visible:layer.visible!==false};
+    if(cropFill.some(v=>v)){part.fill=cropFill;part.cov=cropCov;}
+    parts.push(part);
+  }});
+  return parts;
+}
+// Paint server-redrawn colours into the cap pixels; caps then become full round ends.
+export function applyFill(part,rgba){for(let i=0;i<part.fill.length;i++)if(part.fill[i]){part.data[i*4]=rgba[i*4];part.data[i*4+1]=rgba[i*4+1];part.data[i*4+2]=rgba[i*4+2];}return part;}
+// COCO-17 keypoints from the pose model → joints. COCO "left" is the character's left = screen right.
+const COCO={arm:[5,6],elbow:[7,8],wrist:[9,10],hip:[11,12],knee:[13,14],ankle:[15,16]};
+export function applyPose(rig,keypoints,minScore=.3){
+  if(!Array.isArray(keypoints)||keypoints.length<17)return 0;let n=0;
+  for(const [joint,[l,r]]of Object.entries(COCO))for(const [side,k]of [['right',l],['left',r]]){const [x,y,s]=keypoints[k];const id=`${joint}_${side}`;
+    if(rig.points[id]&&s>=minScore&&x>=0&&y>=0&&x<=rig.width&&y<=rig.height){rig.points[id]={x,y};n++;}}
+  return n;
+}
+// Move each limb joint to the middle of the limb's cross-section (keypoints often sit near an edge).
+export function centerJoints(rig,layers){
+  const P=rig.points,limb={arm_left:['arm','elbow','wrist'],arm_right:['arm','elbow','wrist'],legs:['hip','knee','ankle']};
+  layers.forEach((l,i)=>{const mode=rig.modes[i],chain=limb[mode];if(!chain||!l.data)return;
+    for(const side of mode==='legs'?['left','right']:[mode.slice(4)]){const ids=chain.map(j=>`${j}_${side}`);if(ids.some(id=>!P[id]))continue;
+      for(const k of [1,2]){const a=P[ids[k-1]],b=P[ids[k]],c=P[ids[k+1]]||b,d0=unit(b.x-a.x,b.y-a.y),d1=unit(c.x-b.x,c.y-b.y)||d0;if(!d0)continue;const n=unit(d0.x+d1.x,d0.y+d1.y)||d0,perp={x:-n.y,y:n.x};
+        const alpha=(x,y)=>{const px=Math.floor(x-l.x),py=Math.floor(y-l.y);return px<0||py<0||px>=l.width||py>=l.height?0:l.data[(py*l.width+px)*4+3];};
+        if(alpha(b.x,b.y)<64)continue;const reach=s=>{let t=0;while(t<400&&alpha(b.x+perp.x*s*(t+1),b.y+perp.y*s*(t+1))>=64)t++;return t;},shift=(reach(1)-reach(-1))/2;
+        P[ids[k]]={x:clamp(b.x+perp.x*shift,0,rig.width),y:clamp(b.y+perp.y*shift,0,rig.height)};}}
+  });
+}
+// Held props (objects, weapons) follow the nearest hand instead of staying on the root.
+export function attachProps(rig,layers){
+  layers.forEach((l,i)=>{if(!/^(objects?|weapon|props?|소품|무기)/i.test(l.name)||rig.assignments[i]!=='root')return;let best=Infinity,hand=null;
+    for(const id of ['wrist_left','wrist_right']){const p=rig.points[id];if(!p)continue;const dx=Math.max(l.x-p.x,0,p.x-l.x-l.width),dy=Math.max(l.y-p.y,0,p.y-l.y-l.height),d=Math.hypot(dx,dy);if(d<best){best=d;hand=id;}}
+    if(hand&&best<rig.height*.12)rig.assignments[i]=hand;});
+}
+const slug=s=>String(s).replace(/[^\p{L}\p{N}_-]+/gu,'_').replace(/^_+|_+$/g,'').slice(0,60)||'part';
+// Layers (front-to-back, with RGBA data) become Spine parts: limbs are cut at joints in cutout style.
+export function buildParts(layers,rig){
+  const cutout=(rig.limbStyle??'cutout')==='cutout',parts=[],used=new Map();
+  layers.forEach((l,i)=>{
+    const mode=rig.modes[i],split=cutout&&mode!=='rigid'?splitLimb(l,rig,mode):null;
+    if(split?.length)parts.push(...split.map(p=>({...p,source:i})));
+    else parts.push({...l,source:i,bone:rig.assignments[i],mode:cutout?'rigid':mode});
+  });
+  for(const p of parts){const base=slug(p.name),n=(used.get(base)||0)+1;used.set(base,n);p.slot=n>1?`${base}_${n}`:base;}
+  return parts;
+}
+function chainInfo(pts,x,y){let best={distance:Infinity,t:0},total=0;const lengths=[];
+  for(let i=0;i<pts.length-1;i++){const a=pts[i],b=pts[i+1],dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,u=clamp(((x-a.x)*dx+(y-a.y)*dy)/(len*len),0,1),distance=Math.hypot(x-a.x-u*dx,y-a.y-u*dy);if(distance<best.distance)best={distance,t:total+u*len};lengths.push(len);total+=len;}
   return {...best,lengths};
 }
 function weightsAt(rig,mode,bone,x,y){
   if(mode==='rigid')return [[bone,1]];
-  let side=mode==='arm_left'?'left':'right',names;
+  let side=mode==='arm_left'?'left':'right',names;const chain=ids=>chainInfo(ids.map(id=>rig.points[id]),x,y);
   if(mode==='legs'||mode==='feet'){
-    const left=['hip_left','knee_left','ankle_left'],right=['hip_right','knee_right','ankle_right'];side=chainInfo(rig,left,x,y).distance<=chainInfo(rig,right,x,y).distance?'left':'right';
+    const left=['hip_left','knee_left','ankle_left'],right=['hip_right','knee_right','ankle_right'];side=chain(left).distance<=chain(right).distance?'left':'right';
     if(mode==='feet')return [[`ankle_${side}`,1]];names=side==='left'?left:right;
   }else names=[`arm_${side}`,`elbow_${side}`,`wrist_${side}`];
-  const info=chainInfo(rig,names,x,y),a=info.lengths[0],b=info.lengths[1],blend=Math.max(2,Math.min(a,b)*.16),t=info.t;
+  const info=chain(names),a=info.lengths[0],b=info.lengths[1],blend=Math.max(2,Math.min(a,b)*.16),t=info.t;
   for(const [boundary,index]of [[a,0],[a+b*.88,1]])if(t<boundary+blend){if(t<=boundary-blend)return [[names[index],1]];const v=clamp((t-boundary+blend)/(2*blend),0,1);return [[names[index],1-v],[names[index+1],v]].filter(x=>x[1]>.00001);}
   return [[names[2],1]];
 }
-export function buildMesh(layer,rig,index,order){
-  const mode=rig.modes[index],nx=mode==='legs'||mode==='feet'?10:5,ny=mode==='feet'?5:14,grid=[],lookup=new Map();
+export function buildMesh(layer,rig,mode,bone,setup){
+  const nx=mode==='legs'||mode==='feet'?10:5,ny=mode==='feet'?5:14,grid=[],lookup=new Map(),root=rig.points.root;
   const add=(x,y)=>{const key=`${x},${y}`;if(!lookup.has(key)){lookup.set(key,grid.length);grid.push([x,y]);}};
   for(let x=0;x<=nx;x++)add(x,0);for(let y=1;y<=ny;y++)add(nx,y);for(let x=nx-1;x>=0;x--)add(x,ny);for(let y=ny-1;y>0;y--)add(0,y);const hull=grid.length;
   for(let y=1;y<ny;y++)for(let x=1;x<nx;x++)add(x,y);
   const uvs=[],vertices=[],triangles=[];
-  for(const [gx,gy]of grid){const u=gx/nx,v=gy/ny,x=layer.x+u*layer.width,y=layer.y+v*layer.height;uvs.push(round(u),round(v));const weights=weightsAt(rig,mode,rig.assignments[index],x,y);vertices.push(weights.length);for(const [bone,w]of weights){const p=rig.points[bone];vertices.push(order.indexOf(bone),round(x-p.x),round(p.y-y),w);}}
+  for(const [gx,gy]of grid){const u=gx/nx,v=gy/ny,x=layer.x+u*layer.width,y=layer.y+v*layer.height;uvs.push(round(u),round(v));const weights=weightsAt(rig,mode,bone,x,y);vertices.push(weights.length);for(const [b,w]of weights){const [lx,ly]=toLocal(setup.world,b,x-root.x,root.y-y);vertices.push(setup.order.indexOf(b),round(lx),round(ly),w);}}
   for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){const a=lookup.get(`${x},${y}`),b=lookup.get(`${x+1},${y}`),c=lookup.get(`${x},${y+1}`),d=lookup.get(`${x+1},${y+1}`);triangles.push(a,c,b,b,c,d);}
   const pairs=new Set(),edges=[];for(let i=0;i<triangles.length;i+=3)for(const [a,b]of [[triangles[i],triangles[i+1]],[triangles[i+1],triangles[i+2]],[triangles[i+2],triangles[i]]]){const key=`${Math.min(a,b)},${Math.max(a,b)}`;if(!pairs.has(key)){pairs.add(key);edges.push(a*2,b*2);}}
   return {type:'mesh',uvs,vertices,triangles,hull,edges,width:layer.width,height:layer.height};
 }
-export function makeSkeleton(layers,rig,amplitude=1){
-  const p=rig.points,order=boneOrder(rig),bones=order.map(name=>{if(name==='root')return {name};const parent=rig.parents[name];return {name,parent,x:round(p[name].x-p[parent].x),y:round(p[parent].y-p[name].y),color:'74e6cfff'};});
-  const attachments={},slots=[];
-  for(let i=layers.length-1;i>=0;i--){const l=layers[i],name=`part_${String(i+1).padStart(2,'0')}`,bone=rig.assignments[i],point=p[bone];const slot={name,bone};if(l.visible!==false)slot.attachment=name;slot.color='ffffff'+Math.round((l.opacity??1)*255).toString(16).padStart(2,'0');slots.push(slot);
-    const attachment=rig.modes[i]==='rigid'?{x:round(l.x+l.width/2-point.x),y:round(point.y-l.y-l.height/2),width:l.width,height:l.height}:buildMesh(l,rig,i,order);attachments[name]={[name]:{name,path:name,...attachment}};
+// Template motions are plain FK keys sampled at 15 fps; every IK constraint is keyed to mix 0 so the
+// result in Spine matches the browser preview. New animations made in Spine can use the IK as usual.
+export const animationNames={idle:'대기 (idle)',wave:'손 흔들기 (wave)',cheer:'환호 (cheer)',hop:'가볍게 점프 (hop)'};
+function templateAnimations(rig,ikNames,amplitude){
+  const P=rig.points,s=rig.height/768,A=amplitude,sin=(p,k=1,ph=0)=>Math.sin((p*k+ph)*2*Math.PI),out={};
+  const make=(duration,spec)=>{
+    const frames=Math.max(1,Math.round(duration*15)),times=Array.from({length:frames+1},(_,i)=>i/frames),bones={};
+    for(const [id,tl]of Object.entries(spec)){if(!P[id])continue;const o={};
+      if(tl.rotate)o.rotate=times.map(p=>({time:round(p*duration),value:round(tl.rotate(p))}));
+      for(const key of ['translate','scale'])if(tl[key])o[key]=times.map(p=>{const [x,y]=tl[key](p);return {time:round(p*duration),x:round(x),y:round(y)};});
+      bones[spineName(id)]=o;}
+    const anim={bones};if(ikNames.length)anim.ik=Object.fromEntries(ikNames.map(n=>[n,[{mix:0}]]));return anim;
+  };
+  // o = +1 rotates the screen-right limb outward/up (counter-clockwise); the screen-left limb mirrors it.
+  const each=(fn)=>Object.assign({},...[['left',-1],['right',1]].map(([side,o])=>fn(side,o)));
+  out.idle=make(4,{chest:{rotate:p=>sin(p)*.3*A,scale:p=>[1,1+(1-Math.cos(p*2*Math.PI))*.006*A]},head:{rotate:p=>-sin(p,1,-.08)*.65*A},hair:{rotate:p=>sin(p,1,-.15)*A},
+    ...each((side,o)=>({[`arm_${side}`]:{rotate:p=>-o*sin(p)*.75*A},[`elbow_${side}`]:{rotate:p=>-o*sin(p,1,-.1)*1.2*A}}))});
+  // Template motions stay small: a starting point the animator exaggerates, not a finished take.
+  out.wave=make(1.6,{chest:{rotate:p=>sin(p)*.8},head:{rotate:p=>sin(p,1,.25)*1.5},hair:{rotate:p=>-sin(p,1,.1)*1.2},
+    arm_right:{rotate:p=>40+sin(p)*3},elbow_right:{rotate:p=>25+sin(p,2)*12},wrist_right:{rotate:p=>sin(p,2,-.12)*6},arm_left:{rotate:p=>sin(p)*1}});
+  out.cheer=make(1.2,{body:{translate:p=>[0,(1-Math.cos(p*4*Math.PI))*1.5*s]},head:{rotate:p=>sin(p)*2},hair:{rotate:p=>-sin(p,2,.1)*1.5},
+    ...each((side,o)=>({[`arm_${side}`]:{rotate:p=>o*(30+sin(p,2)*5)},[`elbow_${side}`]:{rotate:p=>o*(10+sin(p,2,.08)*5)}}))});
+  // Hop: crouch → jump → land. The body dip matches how much the bent legs shorten, so feet stay on the ground.
+  const crouch=p=>p<.2?Math.sin(Math.PI*p/.2):p>=.75?Math.sin(Math.PI*(p-.75)/.25)*.7:0,air=p=>p>=.2&&p<.75?Math.sin(Math.PI*(p-.2)/.55):0,theta=9;
+  const leg=side=>P[`hip_${side}`]&&P[`knee_${side}`]&&P[`ankle_${side}`]?Math.hypot(P[`knee_${side}`].x-P[`hip_${side}`].x,P[`knee_${side}`].y-P[`hip_${side}`].y)+Math.hypot(P[`ankle_${side}`].x-P[`knee_${side}`].x,P[`ankle_${side}`].y-P[`knee_${side}`].y):0;
+  const legLength=(leg('left')+leg('right'))/2;
+  out.hop=make(1,{body:{translate:p=>[0,-legLength*(1-Math.cos(theta*crouch(p)*D2R))+air(p)*16*s]},head:{rotate:p=>-crouch(p)*1.5},hair:{rotate:p=>air(p)*3-crouch(p)*1.5},
+    ...each((side,o)=>({[`hip_${side}`]:{rotate:p=>o*theta*crouch(p)},[`knee_${side}`]:{rotate:p=>-o*2*theta*crouch(p)},[`ankle_${side}`]:{rotate:p=>o*theta*crouch(p)},
+      [`arm_${side}`]:{rotate:p=>o*(14*air(p)-4*crouch(p))},[`elbow_${side}`]:{rotate:p=>o*6*air(p)}}))});
+  return out;
+}
+export function makeSkeleton(parts,rig,amplitude=1){
+  const P=rig.points,root=P.root,setup=setupPose(rig),{order,world}=setup;
+  const bones=order.map(id=>{if(id==='root')return {name:'root'};const parent=rig.parents[id],[x,y]=toLocal(world,parent,world[id].x,world[id].y);
+    return {name:spineName(id),parent:spineName(parent),length:round(world[id].length),rotation:round(norm(world[id].angle-world[parent].angle)),x:round(x),y:round(y),color:'74e6cfff'};});
+  const ik=[];
+  if(rig.ik!==false)for(const side of ['left','right'])for(const [kind,a,b,c,holder]of [['arm','arm','elbow','wrist','chest'],['leg','hip','knee','ankle','root']]){
+    const [ia,ib,ic]=[a,b,c].map(j=>`${j}_${side}`);if(!P[ia]||!P[ib]||!P[ic]||!P[holder]||rig.parents[ib]!==ia)continue;
+    const target=`ik_${spineName(ic)}`,[x,y]=toLocal(world,holder,world[ic].x,world[ic].y),wa=world[ia],wb=world[ib],wc=world[ic];
+    bones.push({name:target,parent:spineName(holder),x:round(x),y:round(y),color:'ff3f00ff'});
+    const cross=(wb.x-wa.x)*(wc.y-wb.y)-(wb.y-wa.y)*(wc.x-wb.x),fallback=kind==='arm'?side==='right':side==='left';
+    ik.push({name:`ik_${kind}_${side==='left'?'R':'L'}`,order:ik.length,bones:[spineName(ia),spineName(ib)],target,bendPositive:Math.abs(cross)>1?cross>0:fallback});
   }
-  const timelines={};for(const [bone,degrees]of Object.entries({chest:.3,head:-.65,arm_left:.75,arm_right:-.75,hair:1})){timelines[bone]={rotate:Array.from({length:49},(_,i)=>({time:round(i/12),value:round(Math.sin(i/48*Math.PI*2)*degrees*amplitude)}))};}
-  timelines.chest.scale=Array.from({length:49},(_,i)=>({time:round(i/12),x:1,y:round(1+(1-Math.cos(i/48*Math.PI*2))*.006*amplitude)}));
-  const manual={};for(const [bone,value]of Object.entries(rig.pose||{}))if(p[bone])manual[bone]={rotate:[{value}]};
-  return {skeleton:{spine:'4.0.64',x:-rig.width/2,y:0,width:rig.width,height:rig.height,images:'./images/',fps:30},bones,slots,skins:[{name:'default',attachments}],animations:{idle:{bones:timelines},manual_pose:{bones:manual}}};
+  const attachments={},slots=[];
+  for(let i=parts.length-1;i>=0;i--){const l=parts[i],name=l.slot??`part_${String(i+1).padStart(2,'0')}`,bone=l.bone??rig.assignments[i],mode=l.mode??rig.modes[i];
+    const slot={name,bone:spineName(bone)};if(l.visible!==false)slot.attachment=name;slot.color='ffffff'+Math.round((l.opacity??1)*255).toString(16).padStart(2,'0');slots.push(slot);
+    let attachment;
+    if(mode==='rigid'){const [x,y]=toLocal(world,bone,l.x+l.width/2-root.x,root.y-l.y-l.height/2),rotation=round(norm(-world[bone].angle));attachment={x:round(x),y:round(y),width:l.width,height:l.height};if(rotation)attachment.rotation=rotation;}
+    else attachment=buildMesh(l,rig,mode,bone,setup);
+    attachments[name]={[name]:{name,path:name,...attachment}};
+  }
+  const ikNames=ik.map(c=>c.name),animations=templateAnimations(rig,ikNames,amplitude),manual={};
+  for(const [id,value]of Object.entries(rig.pose||{}))if(P[id])manual[spineName(id)]={rotate:[{value}]};
+  animations.manual_pose={bones:manual};if(ikNames.length)animations.manual_pose.ik=Object.fromEntries(ikNames.map(n=>[n,[{mix:0}]]));
+  const skeleton={skeleton:{spine:'4.0.64',x:-rig.width/2,y:0,width:rig.width,height:rig.height,images:'./images/',fps:30},bones,slots};
+  if(ik.length)skeleton.ik=ik;
+  return {...skeleton,skins:[{name:'default',attachments}],animations};
 }
 function sample(frames,t,key,def){if(!frames?.length)return def;let a=frames[0],b=a;for(const f of frames){if((f.time||0)<=t)a=f;if((f.time||0)>=t){b=f;break;}b=f;}const at=a.time||0,bt=b.time||0,r=bt===at?0:(t-at)/(bt-at);return (a[key]??def)*(1-r)+(b[key]??def)*r;}
-export function poseMatrices(skeleton,time=null,pose={}){
-  const m={};for(const b of skeleton.bones){const tl=time===null?{}:skeleton.animations.idle.bones[b.name]||{},t=(time??0)%4,angle=(sample(tl.rotate,t,'value',0)+(pose[b.name]||0))*Math.PI/180,sx=sample(tl.scale,t,'x',1),sy=sample(tl.scale,t,'y',1),a=Math.cos(angle)*sx,c=-Math.sin(angle)*sy,d=Math.cos(angle)*sy,bb=Math.sin(angle)*sx,x=b.x||0,y=b.y||0;
+export function animationDuration(animation){let d=0;for(const tl of Object.values(animation?.bones||{}))for(const frames of Object.values(tl))for(const f of frames)d=Math.max(d,f.time||0);return d;}
+// World matrices [a,b,c,d,x,y] per bone (Spine coordinates, y up). Pose angles are keyed by Spine bone name.
+export function poseMatrices(skeleton,time=null,pose={},animation='idle'){
+  const anim=time===null?null:skeleton.animations[animation],duration=animationDuration(anim),t=duration?(time%duration):0,m={};
+  for(const b of skeleton.bones){const tl=anim?.bones[b.name]||{},angle=((b.rotation||0)+sample(tl.rotate,t,'value',0)+(pose[b.name]||0))*D2R,sx=sample(tl.scale,t,'x',1),sy=sample(tl.scale,t,'y',1),a=Math.cos(angle)*sx,c=-Math.sin(angle)*sy,d=Math.cos(angle)*sy,bb=Math.sin(angle)*sx,x=(b.x||0)+sample(tl.translate,t,'x',0),y=(b.y||0)+sample(tl.translate,t,'y',0);
     if(!b.parent){m[b.name]=[a,bb,c,d,x,y];continue;}const q=m[b.parent];m[b.name]=[q[0]*a+q[2]*bb,q[1]*a+q[3]*bb,q[0]*c+q[2]*d,q[1]*c+q[3]*d,q[0]*x+q[2]*y+q[4],q[1]*x+q[3]*y+q[5]];
   }return m;
 }
+export const mul=(m,n)=>[m[0]*n[0]+m[2]*n[1],m[1]*n[0]+m[3]*n[1],m[0]*n[2]+m[2]*n[3],m[1]*n[2]+m[3]*n[3],m[0]*n[4]+m[2]*n[5]+m[4],m[1]*n[4]+m[3]*n[5]+m[5]];
+// Maps region image pixels (y down, origin top-left) to Spine world coordinates.
+export function regionMatrix(attachment,bone){const r=(attachment.rotation||0)*D2R,c=Math.cos(r),s=Math.sin(r);return mul(bone,mul([c,s,-s,c,attachment.x||0,attachment.y||0],[1,0,0,-1,-attachment.width/2,attachment.height/2]));}
 export function meshWorldVertices(attachment,skeleton,matrices){const out=[];let cursor=0;for(let i=0;i<attachment.uvs.length/2;i++){let x=0,y=0;const n=attachment.vertices[cursor++];for(let j=0;j<n;j++){const bone=skeleton.bones[attachment.vertices[cursor++]].name,lx=attachment.vertices[cursor++],ly=attachment.vertices[cursor++],w=attachment.vertices[cursor++],q=matrices[bone];x+=(q[0]*lx+q[2]*ly+q[4])*w;y+=(q[1]*lx+q[3]*ly+q[5])*w;}out.push([x,y]);}return out;}
