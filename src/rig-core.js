@@ -356,3 +356,15 @@ export function hiddenMasks(layers,width,height,threshold=230){
   }
   return masks;
 }
+// Visible pixels take the original artwork's colour. See-through sometimes paints lines or colour
+// shifts on visible areas (e.g. an outline along a layer edge); the original image is ground truth.
+// Layers are front-to-back; `original` is RGBA at the same size as the canvas.
+export function matchOriginal(layers,original){
+  const {width,height,data:ref}=original,cover=new Uint8Array(width*height);let changed=0;
+  for(const l of layers){if(!l.data||l.visible===false)continue;const op=l.opacity??1;
+    for(let y=0;y<l.height;y++)for(let x=0;x<l.width;x++){const gx=l.x+x,gy=l.y+y;if(gx<0||gy<0||gx>=width||gy>=height)continue;const i=(y*l.width+x)*4,a=l.data[i+3];if(!a)continue;
+      const g=gy*width+gx,vis=(255-cover[g])/255,w=clamp((vis-.5)/.4,0,1)*(ref[g*4+3]/255);
+      if(w>0){for(let k=0;k<3;k++)l.data[i+k]=Math.round(l.data[i+k]*(1-w)+ref[g*4+k]*w);changed++;}
+      cover[g]=255-Math.round((255-cover[g])*(255-a*op)/255);}}
+  return changed;
+}
