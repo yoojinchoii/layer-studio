@@ -57,6 +57,7 @@ test('cutout splits an arm into upper arm, forearm and hand with ball-joint over
 test('cutout legs separate by side, and rotating a joint keeps it attached',()=>{
   const meta=[{name:'face',x:180,y:0,width:40,height:40},{name:'bottomwear',x:150,y:150,width:100,height:60},{name:'legwear',x:150,y:160,width:100,height:200}];
   const rig=inferRig(meta,400,400);Object.assign(rig.points,{body:{x:200,y:160},hip_left:{x:170,y:170},knee_left:{x:170,y:260},ankle_left:{x:170,y:350},hip_right:{x:230,y:170},knee_right:{x:230,y:260},ankle_right:{x:230,y:350}});
+  rig.limbStyle='cutout';
   const legs=layer('legwear',150,160,100,200,x=>Math.abs(x-170)<12||Math.abs(x-230)<12),parts=buildParts([{...meta[0],data:null},{...meta[1],data:null},legs],rig);
   const names=parts.map(p=>p.slot);for(const n of ['thigh_R','shin_R','foot_R','thigh_L','shin_L','foot_L'])assert.ok(names.includes(n),n);
   assert.ok(parts.filter(p=>p.slot.endsWith('_R')&&p.source===2).every(p=>p.x+p.width<=200),'screen-left leg stays left');
@@ -106,4 +107,47 @@ test('a joint inserted between upper body and chest carries the chest and everyt
   const sk=makeSkeleton(meta,rig),rest=poseMatrices(sk),bent=poseMatrices(sk,null,{[id]:20});
   assert.notDeepEqual(rest.torso,bent.torso);assert.deepEqual(rest.upper_body,bent.upper_body);
   assert.throws(()=>insertJointAt(rig,'x','root',0,0));
+});
+
+test('refined weights fix the wrist tip, align vertices to the elbow, and expose adjustable blend widths',async()=>{
+  const {vertexWeights}=await import('./rig-core.js');
+  const rig=armRig(),arm=layer('handwear-r',90,90,20,250,()=>true);rig.modes=['arm_left'];rig.assignments=['arm_left'];
+  const build=()=>{const p=buildParts([arm],rig),sk=makeSkeleton(p,rig);return {sk,a:sk.skins[0].attachments[p[0].slot][p[0].slot]};};
+  let {sk,a}=build();const hand=vertexWeights(a,sk,'hand_R'),fore=vertexWeights(a,sk,'forearm_R'),upper=vertexWeights(a,sk,'upper_arm_R');
+  let elbow=0,tip=0;for(let i=0;i<hand.length;i++){const y=arm.y+a.uvs[i*2+1]*arm.height;
+    assert.ok(near(hand[i]+fore[i]+upper[i],1,1e-9));
+    if(near(y,200)){assert.ok(near(fore[i],.5,1e-8));elbow++;}
+    if(y>310){assert.equal(hand[i],1);tip++;}
+  }assert.ok(elbow>0&&tip>0);
+  const mixed=mesh=>{const weights=vertexWeights(mesh.a,mesh.sk,'forearm_R');return weights.filter(w=>w>0&&w<1).length;};
+  rig.weightBlend={elbow_left:.35,wrist_left:.35};const narrow=build();
+  rig.weightBlend={elbow_left:2,wrist_left:2};const wide=build();
+  assert.ok(mixed(wide)>=mixed(narrow));
+  const bandRange=({sk,a})=>{const w=vertexWeights(a,sk,'upper_arm_R');return a.uvs.filter((v,i)=>i%2&&w[(i-1)/2]>0&&w[(i-1)/2]<1).map(v=>v*arm.height+arm.y);};
+  const n=bandRange(narrow),b=bandRange(wide);assert.ok(Math.max(...b)-Math.min(...b)>Math.max(...n)-Math.min(...n));
+});
+test('separate leg meshes preserve pixels and never bind to the opposite leg',()=>{
+  const rig=inferRig([{name:'legwear',x:150,y:160,width:100,height:200}],400,400);
+  Object.assign(rig.points,{hip_left:{x:170,y:170},knee_left:{x:170,y:260},ankle_left:{x:170,y:350},hip_right:{x:230,y:170},knee_right:{x:230,y:260},ankle_right:{x:230,y:350}});
+  const source=layer('legwear',150,160,100,200,x=>Math.abs(x-170)<12||Math.abs(x-230)<12),parts=buildParts([source],rig),sk=makeSkeleton(parts,rig);
+  assert.equal(parts.length,2);
+  const pixelCount=p=>p.data.filter((v,i)=>i%4===3&&v>0).length;
+  assert.equal(parts.reduce((n,p)=>n+pixelCount(p),0),pixelCount(source));
+  for(const p of parts){const a=sk.skins[0].attachments[p.slot][p.slot],right=p.mode==='leg_right';let k=0;
+    for(let i=0;i<a.uvs.length/2;i++){const count=a.vertices[k++];let sum=0;for(let j=0;j<count;j++){const bone=sk.bones[a.vertices[k]].name;assert.ok(bone.endsWith(right?'_L':'_R'));sum+=a.vertices[k+3];k+=4;}assert.ok(near(sum,1,1e-9));}
+    const rest=meshWorldVertices(a,sk,poseMatrices(sk)),bent=meshWorldVertices(a,sk,poseMatrices(sk,null,{shin_R:60}));
+    if(right)assert.deepEqual(rest,bent);else assert.ok(rest.some((v,i)=>Math.hypot(v[0]-bent[i][0],v[1]-bent[i][1])>10));
+  }
+});
+test('inserted limb joint receives normalized mesh influence and moves its segment',async()=>{
+  const {insertJointAt,vertexWeights}=await import('./rig-core.js');const rig=armRig();rig.modes=['arm_left'];rig.assignments=['arm_left'];
+  const id=insertJointAt(rig,'보조 관절','elbow_left',100,150),parts=buildParts([layer('handwear-r',90,90,20,250,()=>true)],rig),sk=makeSkeleton(parts,rig),a=sk.skins[0].attachments[parts[0].slot][parts[0].slot];
+  assert.ok(vertexWeights(a,sk,id).some(w=>w===1));
+  const rest=meshWorldVertices(a,sk,poseMatrices(sk)),bent=meshWorldVertices(a,sk,poseMatrices(sk,null,{[id]:20}));assert.ok(rest.some((v,i)=>Math.hypot(v[0]-bent[i][0],v[1]-bent[i][1])>10));
+});
+
+test('deleting a custom joint removes its saved blend setting',async()=>{
+  const {insertJointAt,deleteJoint}=await import('./rig-core.js');const rig=armRig();
+  const id=insertJointAt(rig,'보조 관절','elbow_left',100,150);rig.weightBlend={[id]:1.4};deleteJoint(rig,id);
+  assert.equal(rig.weightBlend[id],undefined);assert.equal(rig.parents.elbow_left,'arm_left');
 });

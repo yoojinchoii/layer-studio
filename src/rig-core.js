@@ -68,7 +68,7 @@ export function inferRig(layers,width,height){
     if(part)return `${partBones[part[1]]}_${part[2]==='r'?'left':'right'}`;
     if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/topwear|상의/.test(n))return 'chest';if(/handwear|^arm|팔/.test(n))return center(l)<cx?'arm_left':'arm_right';if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
   const modes=layers.map((l,i)=>{const n=l.name.toLowerCase();if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
-  return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,limbStyle:'cutout',ik:true};
+  return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,limbStyle:'mesh',weightBlend:{},ik:true};
 }
 // Pixel statistics for opaque pixels of a layer, in image coordinates (pixel centres).
 function opaquePoints(layer,keep=()=>true,stride=1){
@@ -118,7 +118,7 @@ export function boneOrder(rig){
 }
 export function setParent(rig,name,parent){if(name==='root'||name===parent||!rig.points[parent])throw Error('부모 관절을 확인해주세요.');const old=rig.parents[name];rig.parents[name]=parent;try{boneOrder(rig);}catch(e){rig.parents[name]=old;throw e;}}
 export function addJoint(rig,label,parent){if(Object.keys(rig.points).length>=64)throw Error('관절은 최대 64개까지 추가할 수 있어요.');let n=1;while(rig.points[`joint_${n}`])n++;const id=`joint_${n}`,p=rig.points[parent]||rig.points.body;rig.points[id]={x:clamp(p.x+30,0,rig.width),y:clamp(p.y+30,0,rig.height)};rig.parents[id]=rig.points[parent]?parent:'body';rig.labels[id]=label.trim()||`추가 관절 ${n}`;return id;}
-export function deleteJoint(rig,id){if(boneLabels[id])throw Error('기본 관절은 삭제할 수 없어요.');const parent=rig.parents[id];for(const k in rig.parents)if(rig.parents[k]===id)rig.parents[k]=parent;rig.assignments=rig.assignments.map(x=>x===id?parent:x);delete rig.points[id];delete rig.parents[id];delete rig.labels[id];delete rig.pose[id];}
+export function deleteJoint(rig,id){if(boneLabels[id])throw Error('기본 관절은 삭제할 수 없어요.');const parent=rig.parents[id];for(const k in rig.parents)if(rig.parents[k]===id)rig.parents[k]=parent;rig.assignments=rig.assignments.map(x=>x===id?parent:x);delete rig.points[id];delete rig.parents[id];delete rig.labels[id];delete rig.pose[id];if(rig.weightBlend)delete rig.weightBlend[id];}
 // Setup pose: every limb bone points at its next joint so Spine shows real bone lengths and IK can bend them.
 function nextJoint(id){const m=id.match(/^(arm|elbow|hip|knee)_(left|right)$/);if(m)return `${{arm:'elbow',elbow:'wrist',hip:'knee',knee:'ankle'}[m[1]]}_${m[2]}`;return {body:'chest',upper:'chest',chest:'neck',neck:'head'}[id];}
 export function setupPose(rig){
@@ -241,7 +241,9 @@ export function buildParts(layers,rig){
   const cutout=(rig.limbStyle??'cutout')==='cutout',parts=[],used=new Map();
   layers.forEach((l,i)=>{
     const mode=rig.modes[i],split=cutout&&mode!=='rigid'?splitLimb(l,rig,mode):null;
-    if(split?.length)parts.push(...split.map(p=>({...p,source:i})));
+    const sides=!cutout&&(mode==='legs'||mode==='feet')&&l.data?splitMeshSides(l,rig,mode):null;
+    if(sides?.length)parts.push(...sides.map(p=>({...p,source:i})));
+    else if(split?.length)parts.push(...split.map(p=>({...p,source:i})));
     else parts.push({...l,source:i,bone:rig.assignments[i],mode:cutout?'rigid':mode});
   });
   for(const p of parts){const base=slug(p.name),n=(used.get(base)||0)+1;used.set(base,n);p.slot=n>1?`${base}_${n}`:base;}
@@ -251,27 +253,89 @@ function chainInfo(pts,x,y){let best={distance:Infinity,t:0},total=0;const lengt
   for(let i=0;i<pts.length-1;i++){const a=pts[i],b=pts[i+1],dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy)||1,u=clamp(((x-a.x)*dx+(y-a.y)*dy)/(len*len),0,1),distance=Math.hypot(x-a.x-u*dx,y-a.y-u*dy);if(distance<best.distance)best={distance,t:total+u*len};lengths.push(len);total+=len;}
   return {...best,lengths};
 }
-function weightsAt(rig,mode,bone,x,y){
-  if(mode==='rigid')return [[bone,1]];
-  let side=mode==='arm_left'?'left':'right',names;const chain=ids=>chainInfo(ids.map(id=>rig.points[id]),x,y);
-  if(mode==='legs'||mode==='feet'){
-    const left=['hip_left','knee_left','ankle_left'],right=['hip_right','knee_right','ankle_right'];side=chain(left).distance<=chain(right).distance?'left':'right';
-    if(mode==='feet')return [[`ankle_${side}`,1]];names=side==='left'?left:right;
-  }else names=[`arm_${side}`,`elbow_${side}`,`wrist_${side}`];
-  const info=chain(names),a=info.lengths[0],b=info.lengths[1],blend=Math.max(2,Math.min(a,b)*.16),t=info.t;
-  for(const [boundary,index]of [[a,0],[a+b*.88,1]])if(t<boundary+blend){if(t<=boundary-blend)return [[names[index],1]];const v=clamp((t-boundary+blend)/(2*blend),0,1);return [[names[index],1-v],[names[index+1],v]].filter(x=>x[1]>.00001);}
-  return [[names[2],1]];
+// Keep the two legs in separate attachments: triangles and influences cannot bridge across them.
+function splitMeshSides(layer,rig,mode){
+  const chains=['left','right'].map(side=>['hip','knee','ankle'].map(j=>rig.points[`${j}_${side}`]));
+  const owners=[[],[]];
+  for(let y=0;y<layer.height;y++)for(let x=0;x<layer.width;x++){
+    const i=y*layer.width+x;if(!layer.data[i*4+3])continue;
+    const gx=layer.x+x+.5,gy=layer.y+y+.5;
+    owners[chainInfo(chains[0],gx,gy).distance<=chainInfo(chains[1],gx,gy).distance?0:1].push(i);
+  }
+  return owners.flatMap((indices,k)=>{
+    if(!indices.length)return [];let x0=layer.width,y0=layer.height,x1=0,y1=0;
+    for(const i of indices){const x=i%layer.width,y=Math.floor(i/layer.width);x0=Math.min(x0,x);y0=Math.min(y0,y);x1=Math.max(x1,x);y1=Math.max(y1,y);}
+    const width=x1-x0+1,height=y1-y0+1,data=new Uint8ClampedArray(width*height*4);
+    for(const i of indices){const x=i%layer.width-x0,y=Math.floor(i/layer.width)-y0;data.set(layer.data.subarray(i*4,i*4+4),(y*width+x)*4);}
+    const side=k?'right':'left';return [{...layer,canvas:null,name:`${layer.name}_${k?'L':'R'}`,x:layer.x+x0,y:layer.y+y0,width,height,data,mode:`${mode==='legs'?'leg':'foot'}_${side}`,bone:`${mode==='legs'?'hip':'ankle'}_${side}`}];
+  });
+}
+function meshChain(rig,mode,x,y){
+  let side=mode.endsWith('_left')?'left':'right';
+  if(mode==='legs'||mode==='feet')side=chainInfo(['hip_left','knee_left','ankle_left'].map(id=>rig.points[id]),x,y).distance<=chainInfo(['hip_right','knee_right','ankle_right'].map(id=>rig.points[id]),x,y).distance?'left':'right';
+  if(mode==='feet'||mode.startsWith('foot_'))return [`ankle_${side}`];
+  const ids=(mode==='legs'||mode.startsWith('leg_')?['hip','knee','ankle']:['arm','elbow','wrist']).map(j=>`${j}_${side}`),out=[ids[0]];
+  for(let i=1;i<ids.length;i++){
+    const between=[];let parent=rig.parents[ids[i]];
+    while(parent&&parent!==ids[i-1]&&between.length<64){between.push(parent);parent=rig.parents[parent];}
+    if(parent===ids[i-1])out.push(...between.reverse());out.push(ids[i]);
+  }
+  return out;
+}
+const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
+function weightGuide(layer,rig,mode,bone,x,y){
+  if(mode==='rigid')return {names:[bone],joints:[]};
+  const names=meshChain(rig,mode,x,y),points=names.map(id=>rig.points[id]),joints=[];
+  for(let i=1;i<names.length;i++){
+    const prev=points[i-1],p=points[i],next=points[i+1];
+    const incoming=unit(p.x-prev.x,p.y-prev.y)||{x:0,y:1},outgoing=next&&unit(next.x-p.x,next.y-p.y);
+    const dir=outgoing?(unit(incoming.x+outgoing.x,incoming.y+outgoing.y)||incoming):incoming;
+    const len=Math.hypot(p.x-prev.x,p.y-prev.y),after=next?Math.hypot(next.x-p.x,next.y-p.y):len;
+    const maxBand=Math.max(1,Math.min(len,after)*.3);
+    const thickness=layer.data?halfWidth(layer,p,dir):null;
+    const blend=clamp(Number(rig.weightBlend?.[names[i]])||1,.35,2);
+    const band=clamp((thickness===null?Math.min(len,after)*.12:Math.max(2,thickness)*1.25)*blend,1,maxBand);
+    joints.push({id:names[i],p,dir,band});
+  }
+  return {names,joints};
+}
+function guideWeights(guide,x,y){
+  const weights=[];let remaining=1;
+  for(let i=0;i<guide.joints.length;i++){
+    const {p,dir,band}=guide.joints[i],t=smooth((((x-p.x)*dir.x+(y-p.y)*dir.y)/band+1)/2);
+    weights.push([guide.names[i],remaining*(1-t)]);remaining*=t;
+  }
+  weights.push([guide.names.at(-1),remaining]);
+  const kept=weights.filter(([,w])=>w>1e-6).sort((a,b)=>b[1]-a[1]).slice(0,4),total=kept.reduce((n,[,w])=>n+w,0);
+  return kept.map(([id,w])=>[id,w/total]);
+}
+// Joint-aligned rows and columns put vertices at the pivots and both sides of each blend band.
+function meshAxis(size,offset,joints,key){
+  const anchors=[0,size];
+  for(const j of joints)for(const delta of [-1,-.5,0,.5,1])anchors.push(clamp(j.p[key]-offset+delta*j.band,0,size));
+  const count=clamp(Math.ceil(size/18),4,16),values=[...anchors];
+  for(let i=1;i<count;i++){const v=size*i/count;if(!anchors.some(a=>Math.abs(a-v)<1.5))values.push(v);}
+  const sorted=[...new Set(values.map(round))].sort((a,b)=>a-b).filter((v,i,a)=>i===0||v-a[i-1]>.05);
+  return sorted.length<=40?sorted:Array.from({length:40},(_,i)=>sorted[Math.round(i*(sorted.length-1)/39)]);
 }
 export function buildMesh(layer,rig,mode,bone,setup){
-  const nx=mode==='legs'||mode==='feet'?10:5,ny=mode==='feet'?5:14,grid=[],lookup=new Map(),root=rig.points.root;
+  const guide=weightGuide(layer,rig,mode,bone,layer.x+layer.width/2,layer.y+layer.height/2);
+  const xs=meshAxis(layer.width,layer.x,guide.joints,'x'),ys=meshAxis(layer.height,layer.y,guide.joints,'y');
+  const nx=xs.length-1,ny=ys.length-1,grid=[],lookup=new Map(),root=rig.points.root;
   const add=(x,y)=>{const key=`${x},${y}`;if(!lookup.has(key)){lookup.set(key,grid.length);grid.push([x,y]);}};
   for(let x=0;x<=nx;x++)add(x,0);for(let y=1;y<=ny;y++)add(nx,y);for(let x=nx-1;x>=0;x--)add(x,ny);for(let y=ny-1;y>0;y--)add(0,y);const hull=grid.length;
   for(let y=1;y<ny;y++)for(let x=1;x<nx;x++)add(x,y);
   const uvs=[],vertices=[],triangles=[];
-  for(const [gx,gy]of grid){const u=gx/nx,v=gy/ny,x=layer.x+u*layer.width,y=layer.y+v*layer.height;uvs.push(round(u),round(v));const weights=weightsAt(rig,mode,bone,x,y);vertices.push(weights.length);for(const [b,w]of weights){const [lx,ly]=toLocal(setup.world,b,x-root.x,root.y-y);vertices.push(setup.order.indexOf(b),round(lx),round(ly),w);}}
-  for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){const a=lookup.get(`${x},${y}`),b=lookup.get(`${x+1},${y}`),c=lookup.get(`${x},${y+1}`),d=lookup.get(`${x+1},${y+1}`);triangles.push(a,c,b,b,c,d);}
+  for(const [gx,gy]of grid){const u=xs[gx]/layer.width,v=ys[gy]/layer.height,x=layer.x+xs[gx],y=layer.y+ys[gy];uvs.push(u,v);
+    const g=mode==='legs'||mode==='feet'?weightGuide(layer,rig,mode,bone,x,y):guide;
+    const weights=guideWeights(g,x,y);vertices.push(weights.length);
+    for(const [b,w]of weights){const [lx,ly]=toLocal(setup.world,b,x-root.x,root.y-y);vertices.push(setup.order.indexOf(b),round(lx),round(ly),w);}}
+  for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){const a=lookup.get(`${x},${y}`),b=lookup.get(`${x+1},${y}`),c=lookup.get(`${x},${y+1}`),d=lookup.get(`${x+1},${y+1}`);if((x+y)%2)triangles.push(a,c,d,a,d,b);else triangles.push(a,c,b,b,c,d);}
   const pairs=new Set(),edges=[];for(let i=0;i<triangles.length;i+=3)for(const [a,b]of [[triangles[i],triangles[i+1]],[triangles[i+1],triangles[i+2]],[triangles[i+2],triangles[i]]]){const key=`${Math.min(a,b)},${Math.max(a,b)}`;if(!pairs.has(key)){pairs.add(key);edges.push(a*2,b*2);}}
   return {type:'mesh',uvs,vertices,triangles,hull,edges,width:layer.width,height:layer.height};
+}
+export function vertexWeights(attachment,skeleton,boneName){
+  const values=[];let cursor=0;for(let i=0;i<attachment.uvs.length/2;i++){let weight=0;const count=attachment.vertices[cursor++];for(let j=0;j<count;j++){const index=attachment.vertices[cursor++];cursor+=2;const w=attachment.vertices[cursor++];if(skeleton.bones[index].name===boneName)weight+=w;}values.push(weight);}return values;
 }
 // Template motions are plain FK keys sampled at 15 fps; every IK constraint is keyed to mix 0 so the
 // result in Spine matches the browser preview. New animations made in Spine can use the IK as usual.
