@@ -180,7 +180,7 @@ manual_pose: 웹에서 맞춘 포즈.
   }catch(err){toast(err.message);}finally{e.target.value='';}};
   $('rigApply').onclick=()=>{if(!project)return;state.layers=project.layers;state.kind='관절 편집 완료';state.view='composite';render();$('rigDialog').close();toast('보정 파츠를 적용했어요. 관절 편집은 다시 열어 이어갈 수 있습니다.');};
   $('rigAnim').replaceChildren(...Object.entries(animationNames).map(([k,v])=>new Option(v,k)));
-  const spinePreview=installSpinePreview({canSend:()=>!!project&&!processing&&!state.busy,snapshot:()=>({name:state.name,skeleton:skeleton(),parts:parts()})});
+  const spinePreview=installSpinePreview({download,canSend:()=>!!project&&!processing&&!state.busy,snapshot:()=>({name:state.name,skeleton:skeleton(),parts:parts()})});
   $('rigDialog').addEventListener('close',()=>spinePreview.update());
   $('autoRigBtn').onclick=prepare;return {prepare,update:()=>{$('autoRigBtn').disabled=state.busy||state.layers.length<2;$('rigProjectOpen').disabled=state.busy;spinePreview.update();}};
 }

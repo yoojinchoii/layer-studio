@@ -18,15 +18,15 @@ export function makePreviewArchive({name,skeleton,parts}){
   return bytes;
 }
 
-export function installSpinePreview({snapshot,canSend}){
+export function installSpinePreview({snapshot,canSend,download}){
   const $=id=>document.getElementById(id);
   let sending=false,job=null;
   const say=text=>$('spineBridgeStatus').textContent=text;
-  const unavailable='Mac에서 ‘Spine 연결 시작.command’를 실행해주세요. 실행 중이라면 브라우저의 로컬 네트워크 접근 권한을 확인해주세요.';
+  const unavailable='직접 연결을 사용할 수 없어요. Mac 연결 프로그램을 실행했다면 ‘Spine에서 확인’을 눌러 다운로드 방식으로 전송할 수 있어요.';
   async function request(path,options={}){
     let response;
     try{response=await fetch(BRIDGE+path,{...options,headers:{...HEADERS,...options.headers},cache:'no-store',redirect:'error',signal:AbortSignal.timeout(options.method==='POST'?30000:5000)});}
-    catch{throw Error(unavailable);}
+    catch{throw Object.assign(Error(unavailable),{localConnectionFailed:true});}
     const data=await response.json();
     if(!response.ok)throw Error(data.message||`연결 프로그램 응답 오류 (${response.status})`);
     return data;
@@ -62,7 +62,16 @@ export function installSpinePreview({snapshot,canSend}){
     if(sending||!canSend())return;
     sending=true;update();say('Spine 연결을 확인하는 중…');
     try{
-      const info=await health();
+      let info;
+      try{info=await health();}
+      catch(e){
+        if(!e.localConnectionFailed||job)throw e;
+        const archive=makePreviewArchive(snapshot());
+        download(new Blob([archive],{type:'application/zip'}),'LayerStudio-Preview-'+crypto.randomUUID()+'.zip');
+        say('직접 연결이 안 되어 확인용 파일 다운로드를 요청했어요. Mac 연결 프로그램이 실행 중이면 다운로드 폴더에서 자동으로 받아 Spine을 엽니다. 파일 저장 위치는 ‘다운로드’를 선택해주세요.');
+        $('spinePreviewPath').textContent='진행 결과는 연결 프로그램 창에서 확인할 수 있어요. 프로그램이 꺼져 있다면 실행 후 다시 눌러주세요.';
+        return;
+      }
       if(job){say('이전 전송 결과를 먼저 확인하는 중…');await waitForJob();return;}
       if(info.busy)throw Error('이전 Spine 변환이 끝난 뒤 다시 눌러주세요.');
       say('현재 파츠·관절·포즈를 Spine으로 보내는 중…');
