@@ -1,4 +1,5 @@
-import {cleanPixels,inferRig,refineRig,buildParts,applyPose,applyFill,hiddenMasks,matchOriginal,centerJoints,attachProps,makeSkeleton,poseMatrices,boneLabels,meshWorldVertices,regionMatrix,mul,spineName,animationNames,addJoint,addJointAt,upgradeRig,deleteJoint,setParent,boneOrder} from './rig-core.js';
+import {installSpinePreview} from './spine-preview.js';
+import {cleanPixels,inferRig,refineRig,buildParts,applyPose,applyFill,hiddenMasks,matchOriginal,centerJoints,attachProps,makeSkeleton,poseMatrices,boneLabels,meshWorldVertices,regionMatrix,mul,spineName,animationNames,addJoint,addJointAt,insertJointAt,upgradeRig,deleteJoint,setParent,boneOrder} from './rig-core.js';
 import {packAtlas,encodePNG} from './spine-export.js';
 import {zipSync,strToU8} from 'fflate';
 import {writePsd} from 'ag-psd';
@@ -62,10 +63,10 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     }catch(e){message(e.message);toast(e.message);}
   }
   async function cleanup(){
-    stop();processing=true;$('rigProjectOpen').disabled=true;const next=[];let removed=0;for(const id of ['rigClean','rigSave','rigApply','rigProjectSave'])$(id).disabled=true;
+    stop();processing=true;$('rigProjectOpen').disabled=true;const next=[];let removed=0;for(const id of ['rigClean','rigSave','rigApply','rigProjectSave','rigSpinePreview'])$(id).disabled=true;
     try{for(const l of project.source){const c=canvas(l.canvas.width,l.canvas.height),ctx=c.getContext('2d');ctx.drawImage(l.canvas,0,0);const pixels=ctx.getImageData(0,0,c.width,c.height),r=cleanPixels(pixels.data,c.width,c.height,Number($('rigStrength').value));pixels.data.set(r.data);ctx.putImageData(pixels,0,0);removed+=r.removed;next.push({...l,canvas:c});await new Promise(r=>setTimeout(r,0));}const ref=state.reference;if(ref&&ref.width===project.rig.width&&ref.height===project.rig.height){const datas=next.map(l=>{const ctx=l.canvas.getContext('2d');return {ctx,img:ctx.getImageData(0,0,l.canvas.width,l.canvas.height)};});matchOriginal(next.map((l,i)=>({...l,width:l.canvas.width,height:l.canvas.height,data:datas[i].img.data})),{width:ref.width,height:ref.height,data:ref.getContext('2d').getImageData(0,0,ref.width,ref.height).data});datas.forEach(d=>d.ctx.putImageData(d.img,0,0));}
     project.layers=next;project.removed=removed;project.cleanVersion=(project.cleanVersion||0)+1;dirty();status();draw();}
-    finally{processing=false;$('rigProjectOpen').disabled=state.busy;for(const id of ['rigClean','rigSave','rigApply','rigProjectSave'])$(id).disabled=false;}
+    finally{processing=false;$('rigProjectOpen').disabled=state.busy;for(const id of ['rigClean','rigSave','rigApply','rigProjectSave','rigSpinePreview'])$(id).disabled=false;}
   }
   // Spine parts derived from the cleaned layers and the current joints; rebuilt whenever either changes.
   function parts(){
@@ -104,7 +105,7 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   function binding(){const i=Number($('rigLayer').value);$('rigBind').value=project.rig.assignments[i];$('rigDeform').value=project.rig.modes[i];}
   function setPoint(x,y){if(!Number.isFinite(x)||!Number.isFinite(y))return;const {width,height}=project.rig;project.rig.points[selected()]={x:Math.max(0,Math.min(width,x)),y:Math.max(0,Math.min(height,y))};dirty();fields();}
   const mouse=e=>{const r=$('rigCanvas').getBoundingClientRect();return {x:(e.clientX-r.left)/r.width*project.rig.width,y:(e.clientY-r.top)/r.height*project.rig.height};};
-  $('rigCanvas').onpointerdown=e=>{if(!project||playing)return;if(placing){const pos=mouse(e);placing=false;$('rigAdd').classList.remove('primary');try{remember();const id=addJointAt(project.rig,$('rigJointName').value,selected(),pos.x,pos.y);$('rigJointName').value='';dirty();menus(id);message(`'${project.rig.labels[id]}' 관절을 추가했어요. 아래 '파츠와 관절 연결'에서 이 관절로 움직일 파츠를 지정하세요.`);}catch(err){message(err.message);}return;}const pos=mouse(e),points=jointPositions(),radius=16*project.rig.width/$('rigCanvas').getBoundingClientRect().width;let nearest=null,best=radius;for(const [id,p]of Object.entries(points)){if(id==='root')continue;const dist=Math.hypot(pos.x-p.x,pos.y-p.y);if(dist<best){nearest=id;best=dist;}}
+  $('rigCanvas').onpointerdown=e=>{if(!project||playing)return;if(placing){const pos=mouse(e);placing=false;$('rigAdd').classList.remove('primary');try{remember();const between=$('rigInsertMode').value==='between',id=(between?insertJointAt:addJointAt)(project.rig,$('rigJointName').value,selected(),pos.x,pos.y);$('rigJointName').value='';dirty();menus(id);message(`'${project.rig.labels[id]}' 관절을 추가했어요. 아래 '파츠와 관절 연결'에서 이 관절로 움직일 파츠를 지정하세요.`);}catch(err){message(err.message);}return;}const pos=mouse(e),points=jointPositions(),radius=16*project.rig.width/$('rigCanvas').getBoundingClientRect().width;let nearest=null,best=radius;for(const [id,p]of Object.entries(points)){if(id==='root')continue;const dist=Math.hypot(pos.x-p.x,pos.y-p.y);if(dist<best){nearest=id;best=dist;}}
     if(nearest){$('rigBone').value=nearest;fields();}if(poseMode()){if(nearest)message('각도 슬라이더로 선택한 관절을 굽혀보세요.');return;}if(!nearest)return;
     remember();drag={id:selected(),dx:project.rig.points[selected()].x-pos.x,dy:project.rig.points[selected()].y-pos.y};$('rigCanvas').setPointerCapture(e.pointerId);$('rigCanvas').focus();e.preventDefault();};
   $('rigCanvas').onpointermove=e=>{if(!drag)return;const p=mouse(e);setPoint(p.x+drag.dx,p.y+drag.dy);};
@@ -118,7 +119,8 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   $('rigIK').onchange=()=>{remember();project.rig.ik=$('rigIK').checked;dirty();};
   $('rigAnim').onchange=()=>{if(playing){started=performance.now();}else draw();};
   $('rigParent').onchange=()=>{try{remember();setParent(project.rig,selected(),$('rigParent').value);dirty();menus();}catch(e){message(e.message);fields();}};
-  $('rigAdd').onclick=()=>{if(!project)return;if($('rigMode').value!=='setup'){$('rigMode').value='setup';fields();}stop();placing=!placing;$('rigAdd').classList.toggle('primary',placing);message(placing?`미리보기에서 새 관절 위치를 클릭하세요. 부모: ${project.rig.labels[selected()]||selected()} (다시 누르면 취소)`:'관절 추가를 취소했어요.');};
+  $('rigAdd').onclick=()=>{if(!project)return;if($('rigMode').value!=='setup'){$('rigMode').value='setup';fields();}stop();placing=!placing;$('rigAdd').classList.toggle('primary',placing);const name=k=>project.rig.labels[k]||k,sel=selected();if(placing&&$('rigInsertMode').value==='between'&&sel==='root'){placing=false;$('rigAdd').classList.remove('primary');message('전체 기준 위에는 넣을 수 없어요.');return;}
+    message(placing?($('rigInsertMode').value==='between'?`미리보기에서 위치를 클릭하세요. ${name(project.rig.parents[sel])} → [새 관절] → ${name(sel)} 순서로 들어갑니다. (다시 누르면 취소)`:`미리보기에서 새 관절 위치를 클릭하세요. ${name(sel)} 아래에 붙습니다. (다시 누르면 취소)`):'관절 추가를 취소했어요.');};
   $('rigDelete').onclick=()=>{try{remember();deleteJoint(project.rig,selected());dirty();menus('body');}catch(e){message(e.message);}};
   $('rigUndo').onclick=()=>{if(!history.length)return;project.rig=JSON.parse(history.pop());dirty();menus();};
   $('rigReinfer').onclick=()=>{if(!project)return;remember();const fresh=inferRig(project.meta,project.rig.width,project.rig.height);refineRig(fresh,project.layers.map((l,i)=>({...project.meta[i],data:pixels(l.canvas)})));for(const id of Object.keys(fresh.points))if(boneLabels[id])project.rig.points[id]=fresh.points[id];dirty();fields();status();message('관절 위치를 파츠 모양에서 다시 추정했어요. 추가 관절과 연결 설정은 유지됩니다.');};
@@ -178,7 +180,9 @@ manual_pose: 웹에서 맞춘 포즈.
   }catch(err){toast(err.message);}finally{e.target.value='';}};
   $('rigApply').onclick=()=>{if(!project)return;state.layers=project.layers;state.kind='관절 편집 완료';state.view='composite';render();$('rigDialog').close();toast('보정 파츠를 적용했어요. 관절 편집은 다시 열어 이어갈 수 있습니다.');};
   $('rigAnim').replaceChildren(...Object.entries(animationNames).map(([k,v])=>new Option(v,k)));
-  $('autoRigBtn').onclick=prepare;return {prepare,update:()=>{$('autoRigBtn').disabled=state.busy||state.layers.length<2;$('rigProjectOpen').disabled=state.busy;}};
+  const spinePreview=installSpinePreview({canSend:()=>!!project&&!processing&&!state.busy,snapshot:()=>({name:state.name,skeleton:skeleton(),parts:parts()})});
+  $('rigDialog').addEventListener('close',()=>spinePreview.update());
+  $('autoRigBtn').onclick=prepare;return {prepare,update:()=>{$('autoRigBtn').disabled=state.busy||state.layers.length<2;$('rigProjectOpen').disabled=state.busy;spinePreview.update();}};
 }
 function validateProject(s){
   const finite=n=>typeof n==='number'&&Number.isFinite(n),positive=n=>Number.isInteger(n)&&n>0&&n<=8192;

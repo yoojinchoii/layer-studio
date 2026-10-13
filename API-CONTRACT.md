@@ -62,3 +62,13 @@ AI 분리 성공 후 선택적으로 관절 편집 창을 엽니다. 이 단계�
 
 ## 자동 연결
 서버 주소 기본값은 소스에 포함되지만 실제 접속 키는 포함하지 않습니다. 사용자가 연결 파일을 불러오면 즉시 /health로 검증하고, 자동 연결 옵션이 켜진 경우 URL·키를 localStorage의 layer-studio.connection.v1에 저장합니다. 페이지 시작 및 인터넷 연결 복구 시 저장된 서버의 GET /health만 호출하며 GPU 작업은 자동 실행하지 않습니다. 인증 실패 시 저장 키를 삭제하고, 네트워크 실패 시 재시도를 위해 보관합니다. 연결 해제 또는 자동 연결 해제 시 해당 저장 키만 제거합니다. 다른 브라우저/기기에서는 한 번 다시 연결해야 합니다.
+
+## Local Spine preview bridge (Mac)
+
+The rig editor's `Spine에서 확인` button uses `http://127.0.0.1:19464`, independently of the Modal connection. It never invokes inference or inpainting. The separately installed `spine-bridge/bridge.py` listens only on loopback and requires the exact Site/preview Origin, loopback Host and `X-Layer-Studio: spine-preview-v1` header. It accepts no filesystem paths or shell commands from the browser.
+
+- GET `/health`: `{service:"layer-studio-spine-bridge", version:1, spineFound, busy}`.
+- POST `/preview`: application/zip, max 60 MiB, `preview.json` with format `layer-studio-spine-preview-v1`, `skeleton.json`, `images/<safe-name>.png`. Returns 202 and `job_id`; 409 while another conversion is active.
+- GET `/jobs/<job_id>`: working/done/failed; successful result includes project path, parts, bones and whether macOS accepted the open request. This does not guarantee the editor has dismissed an existing save dialog.
+
+The bridge validates ZIP names, total expanded size, PNG dimensions and attachment paths before writing; fixes the images directory; creates a unique directory per request; invokes installed Spine 4.0.64 via CLI; opens the newly created `.spine`. It does not overwrite or synchronize existing Spine projects. Manual pose is stored as `manual_pose`. Browser local-network access must be allowed when prompted. The Mac bridge is distributed in `/spine-bridge-mac.zip`; start it once per computer session. No autostart daemon is installed.

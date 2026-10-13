@@ -16,3 +16,5 @@
 .rig-preview-tools select{width:auto;min-height:36px;padding:6px 10px}#rigReinfer{width:100%;border:1px solid #3a4556;margin-top:4px}
 
 .rig-controls .rig-row input[type=range]{flex:1}.rig-controls .rig-row{display:flex;gap:8px;align-items:center}
+
+.spine-bridge-panel{margin-top:10px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:#14232c;font-size:12px}.spine-bridge-panel p{margin:0;line-height:1.5}.spine-bridge-tools{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px}.spine-bridge-tools .button{font-size:12px;padding:6px 8px;text-decoration:none}.spine-bridge-tools span{color:var(--muted)}#spinePreviewPath{display:block;overflow-wrap:anywhere;color:var(--muted);margin-top:4px}

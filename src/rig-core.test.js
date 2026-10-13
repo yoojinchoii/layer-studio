@@ -98,3 +98,12 @@ test('atlas packs without overlap into a premultiplied PNG Unity can read',()=>{
   const len=new DataView(png.buffer).getUint32(33),raw=unzlibSync(png.slice(41,41+len));assert.equal(raw.length,(pg.width*4+1)*pg.height);
   assert.deepEqual([...raw.slice(1,1+pg.width*4)],[...pg.rgba.slice(0,pg.width*4)]);
 });
+test('a joint inserted between upper body and chest carries the chest and everything above it',async()=>{
+  const {insertJointAt}=await import('./rig-core.js');
+  const meta=[{name:'face',x:140,y:30,width:50,height:60},{name:'topwear',x:110,y:85,width:100,height:130}];
+  const rig=inferRig(meta,320,480),id=insertJointAt(rig,'허리','chest',160,230);
+  assert.equal(rig.parents[id],'upper');assert.equal(rig.parents.chest,id);assert.ok(boneOrder(rig).indexOf(id)<boneOrder(rig).indexOf('chest'));
+  const sk=makeSkeleton(meta,rig),rest=poseMatrices(sk),bent=poseMatrices(sk,null,{[id]:20});
+  assert.notDeepEqual(rest.torso,bent.torso);assert.deepEqual(rest.upper_body,bent.upper_body);
+  assert.throws(()=>insertJointAt(rig,'x','root',0,0));
+});

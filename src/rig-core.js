@@ -125,7 +125,9 @@ export function setupPose(rig){
   const P=rig.points,root=P.root,order=boneOrder(rig),world={},s=rig.height/768;
   const at=id=>({x:P[id].x-root.x,y:root.y-P[id].y});
   for(const id of order){
-    const pos=at(id),next=nextJoint(id);let angle=0,length=0;
+    // Point at the mapped next joint while it is still a direct child, else at the only child.
+    const kids=order.filter(k=>rig.parents[k]===id),mapped=nextJoint(id),next=mapped&&rig.parents[mapped]===id?mapped:kids.length===1?kids[0]:null;
+    const pos=at(id);let angle=0,length=0;
     if(id!=='root'){
       const parent=world[rig.parents[id]],to=next&&P[next]?at(next):null,dir=to&&unit(to.x-pos.x,to.y-pos.y);
       if(dir){angle=Math.atan2(dir.y,dir.x)/D2R;length=Math.hypot(to.x-pos.x,to.y-pos.y);}
@@ -378,3 +380,5 @@ export function upgradeRig(rig){
 }
 // A joint the user placed on the canvas.
 export function addJointAt(rig,label,parent,x,y){const id=addJoint(rig,label,parent);rig.points[id]={x:clamp(x,0,rig.width),y:clamp(y,0,rig.height)};return id;}
+// Insert a joint between `child` and its current parent (e.g. upper body → [waist] → chest).
+export function insertJointAt(rig,label,child,x,y){if(child==='root'||!rig.points[child])throw Error('사이에 넣을 관절을 선택해주세요.');const parent=rig.parents[child],id=addJointAt(rig,label,parent,x,y);rig.parents[child]=id;return id;}
