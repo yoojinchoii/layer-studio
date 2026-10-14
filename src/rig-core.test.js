@@ -170,6 +170,21 @@ test('internal seam cleanup repairs hidden dark edges while preserving alpha and
   assert.ok(arm.data[(1*30+15)*4]>100);assert.equal(arm.data[(20*30)*4],20);
   for(let i=3;i<arm.data.length;i+=4)assert.equal(arm.data[i],original[i]);
 });
+test('narrow neck/chest overlaps remove the entire internal line without erasing shoulders',async()=>{
+  const {repairSeams}=await import('./rig-core.js');
+  const shirt=layer('topwear',10,30,60,30,()=>true),neck=layer('neck',30,10,20,40,()=>true);
+  for(let x=0;x<shirt.width;x++)shirt.data.set([40,35,30,255],x*4);
+  const alpha=shirt.data.filter((_,i)=>i%4===3);
+  repairSeams([shirt,neck],80,70);
+  // Both ends of this seam are inside the previous wide silhouette protection band.
+  for(const x of [31,40,48])assert.ok(shirt.data[(x-shirt.x)*4]>150,`neck contact at ${x}`);
+  assert.equal(shirt.data[0],40,'outer shoulder outline remains');
+  assert.deepEqual(shirt.data.filter((_,i)=>i%4===3),alpha,'no holes or silhouette changes');
+  const hiddenShirt=layer('topwear',10,30,60,30,()=>true);
+  for(let x=0;x<hiddenShirt.width;x++)hiddenShirt.data.set([40,35,30,255],x*4);
+  repairSeams([hiddenShirt,{...neck,visible:false}],80,70);
+  assert.equal(hiddenShirt.data[(31-hiddenShirt.x)*4],40,'hidden neck cannot authorize contact repair');
+});
 test('visible contact lines are repaired, while the outer silhouette and eye detail stay intact',async()=>{
   const {repairSeams}=await import('./rig-core.js');
   const shirt=layer('topwear',5,20,30,20,()=>true),neck=layer('neck',5,0,30,35,()=>true),eye=layer('eye',15,3,3,3,()=>true);

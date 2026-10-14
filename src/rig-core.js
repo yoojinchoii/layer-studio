@@ -458,7 +458,7 @@ export function repairSeams(layers,width,height){
   for(const l of layers)if(l.data&&l.visible!==false)for(let y=0;y<l.height;y++)for(let x=0;x<l.width;x++){
     const gx=Math.round(l.x+x),gy=Math.round(l.y+y);if(gx>=0&&gy>=0&&gx<width&&gy<height){const g=(gy*width+gx)*4+3;union[g]=Math.max(union[g],l.data[(y*l.width+x)*4+3]*(l.opacity??1));}}
   const outer=edgeDistance({width,height,data:union});
-  const necks=layers.filter(l=>/^(neck|목)(?:$|[_ -])/i.test(l.name));
+  const necks=layers.filter(l=>l.data&&l.visible!==false&&/^(neck|목)(?:$|[_ -])/i.test(l.name));
   const onNeck=(x,y)=>necks.some(l=>{const xx=Math.floor(x-l.x),yy=Math.floor(y-l.y);return xx>=0&&yy>=0&&xx<l.width&&yy<l.height&&l.data[(yy*l.width+xx)*4+3]>64;});
   layers.forEach((l,index)=>{
     if(!l.data||l.visible===false||/eye|irides|mouth|nose|brow|눈|입|코/i.test(l.name))return;
@@ -468,7 +468,11 @@ export function repairSeams(layers,width,height){
     const surface=/topwear|bottomwear|handwear|legwear|footwear|neck|arm|leg|foot|shoe|상의|하의|팔|다리|신발|목/i.test(l.name),face=/^(face|얼굴)$/i.test(l.name);
     for(let y=0;y<l.height;y++)for(let x=0;x<l.width;x++){const i=y*l.width+x,gx=Math.round(l.x+x),gy=Math.round(l.y+y);
       const interior=gx>=0&&gy>=0&&gx<width&&gy<height&&outer[gy*width+gx]>radius;
-      const contact=interior&&(surface||face&&y>l.height*.65&&onNeck(gx,gy));
+      // The neck is often narrower than twice the generic silhouette guard. At a verified
+      // neck overlap, protect only the actual exterior pixel, not a wide band on either side.
+      // See-through also includes the exposed chest skin in the topwear layer.
+      const neckContact=/^(topwear|상의)(?:$|[_ -])/i.test(l.name)&&onNeck(gx,gy)&&gx>=0&&gy>=0&&gx<width&&gy<height&&outer[gy*width+gx]>1;
+      const contact=neckContact||interior&&(surface||face&&y>l.height*.65&&onNeck(gx,gy));
       if((!mask[i]&&!contact)||src[i*4+3]<8||edge[i]>radius)continue;
       let best=-1,score=Infinity;const dark=lum(i);
       for(let dy=-radius;dy<=radius;dy++)for(let dx=-radius;dx<=radius;dx++){
