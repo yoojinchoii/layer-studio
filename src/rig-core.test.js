@@ -151,3 +151,22 @@ test('deleting a custom joint removes its saved blend setting',async()=>{
   const id=insertJointAt(rig,'보조 관절','elbow_left',100,150);rig.weightBlend={[id]:1.4};deleteJoint(rig,id);
   assert.equal(rig.weightBlend[id],undefined);assert.equal(rig.parents.elbow_left,'arm_left');
 });
+test('silhouette mesh encloses painted pixels and avoids rectangular empty corners',async()=>{
+  const {silhouetteTopology}=await import('./mesh-topology.js');
+  const l=layer('arm',0,0,80,100,(x,y)=>Math.abs(x-20-y*.4)<8),top=silhouetteTopology(l,[]);
+  assert.ok(top.hull>3);assert.ok(top.points.length<100);
+  const cross=(a,b,p)=>(b[0]-a[0])*(p[1]-a[1])-(b[1]-a[1])*(p[0]-a[0]);
+  const contains=(a,b,c,p)=>{const d=[cross(a,b,p),cross(b,c,p),cross(c,a,p)];return d.every(x=>x>=-1e-5)||d.every(x=>x<=1e-5);};
+  for(let y=0;y<l.height;y++)for(let x=0;x<l.width;x++)if(l.data[(y*l.width+x)*4+3]){
+    let found=false;for(let k=0;k<top.triangles.length;k+=3)if(contains(...top.triangles.slice(k,k+3).map(i=>top.points[i]),[x+.5,y+.5])){found=true;break;}assert.ok(found,`${x},${y} lost`);
+  }
+});
+test('internal seam cleanup repairs hidden dark edges while preserving alpha and exterior lines',async()=>{
+  const {repairSeams}=await import('./rig-core.js');
+  const front=layer('shirt',0,0,30,8,()=>true),arm=layer('arm',0,0,30,40,()=>true);
+  for(let i=0;i<arm.data.length;i+=4)arm.data.set([190,140,100,255],i);
+  for(let y=0;y<40;y++)for(let x=0;x<30;x++)if(x<2||x>=28||y<2||y>=38)arm.data.set([20,20,20,255],(y*30+x)*4);
+  const original=arm.data.slice();assert.ok(repairSeams([front,arm],40,50)>0);
+  assert.ok(arm.data[(1*30+15)*4]>100);assert.equal(arm.data[(20*30)*4],20);
+  for(let i=3;i<arm.data.length;i+=4)assert.equal(arm.data[i],original[i]);
+});

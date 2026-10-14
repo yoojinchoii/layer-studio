@@ -55,7 +55,7 @@ AI 분리 성공 후 선택적으로 관절 편집 창을 엽니다. 이 단계�
 - 점 드래그, 좌표 입력, 방향키, 부모 연결, 추가 관절(최대 64개), 되돌리기를 지원합니다.
 - 새 리그의 기본값은 메쉬·가중치입니다. 기존 파츠 분리 프로젝트는 `메쉬·가중치 적용`으로 전환합니다. 팔·다리는 관절 주변에 정점을 더 배치하고, 좌우 다리·신발을 별도 메쉬로 분리합니다. 머리·얼굴 등 rigid 파츠는 한 뼈에 고정합니다.
 - 관절별 `weightBlend`(.35–2)를 저장하며 가중치 표시와 부드러움 슬라이더를 제공합니다. 내보낸 가중치를 Spine에서 그대로 편집하세요. 웹 재내보내기는 Spine에서 한 수정을 역으로 가져오거나 병합하지 않습니다.
-- 메쉬는 사각 격자이며 실루엣을 따는 토폴로지는 아닙니다. 큰 굽힘에서는 접힘이나 이음새를 Spine에서 추가 보정해야 할 수 있습니다. IK는 선택적으로 생성하며 기본 모션은 FK를 사용합니다.
+- 메쉬는 알파 외곽의 볼록 껍질과 관절 단면을 중심으로 배치합니다. 오목한 빈 공간은 투명 픽셀로 유지하며 구멍별 외곽을 따는 완전한 실루엣 토폴로지는 아닙니다. 큰 굽힘에서는 접힘이나 이음새를 Spine에서 추가 보정해야 할 수 있습니다. IK는 선택적으로 생성하며 기본 모션은 FK를 사용합니다.
 - `skeleton.json`: Spine 4.0.64 JSON, weighted meshes, idle 및 manual_pose 동작.
 - `layer-studio-rig-v2` 편집 프로젝트 JSON: 원본 파츠 PNG·관절·파츠 연결·보정 강도·수동 포즈를 저장합니다. 페이지를 닫기 전에 다운로드해야 합니다.
 - 예제는 기존 AI 분리 결과를 정적 파일로 사용하며 서버 실행 비용이 없습니다.
@@ -76,3 +76,14 @@ The rig editor's `Spine에서 확인` button uses `http://127.0.0.1:19464`, inde
 The bridge validates ZIP names, total expanded size, PNG dimensions and attachment paths before writing; fixes the images directory; creates a unique directory per request; invokes installed Spine 4.0.64 via CLI; opens the newly created `.spine`. It does not overwrite or synchronize existing Spine projects. Manual pose is stored as `manual_pose`. Browser local-network access must be allowed when prompted. The Mac bridge is distributed in `/spine-bridge-mac.zip`; start it once per computer session. No autostart daemon is installed.
 
 If the browser blocks loopback health access, the preview button downloads `LayerStudio-Preview-<uuid>.zip`. The running bridge watches only new completed files with this name in ~/Downloads, validates the same package, and converts once per file revision. It ignores pre-existing downloads and unrelated files. The web UI does not claim confirmed completion for this fallback; the bridge terminal reports completion.
+
+
+## 2026-10-14 refinement and bridge v2
+
+Reference projects were analyzed locally (five files, including two 4.1.21 projects exported with matching Spine). Their art and authored rigs are not bundled or uploaded. Sparse outline/joint placement and normalized influence pruning inform the generated limb meshes; authored face, finger, clothing control rigs are not automatically reproduced.
+
+`repairSeams` repairs only dark, covered pixels near a part's alpha boundary, using nearby opaque color in the same part. Alpha, exterior outlines, and facial detail layers are preserved. It cannot reliably classify every intentional line. `pixelsProcessed` project saves carry corrected raster layers and optional cutout cap fills; reopening skips destructive cleanup. Export no longer triggers paid AI inpainting.
+
+Bridge v2 supports `/sync` (same validated ZIP transport, no user download) to an ID-scoped `Previews/Live/<uuid>/` folder. The browser debounces edits, serializes requests, and stops automatic sync on failure. `/open-live` compiles current JSON into the same `preview.spine`, retaining one `previous.spine`. A stored hash prevents overwriting a project saved by Spine. Unsaved editor state cannot be detected; native open does not guarantee reloading an already open document. Image file changes are supported by Spine's image watcher; bone/mesh/weight changes need reopen/import. No bidirectional editing or undocumented editor injection is claimed.
+
+`/studio/` serves the bundled same-origin editor from loopback for browsers that block HTTPS-to-loopback. Static paths are allowlisted; mutation paths still require exact Host, Origin (or same-origin Fetch Metadata), and the custom header. Cloud and local browser storage are separate. Automatic sync never invokes AI or downloads repeated ZIP files.

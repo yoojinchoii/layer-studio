@@ -1,3 +1,4 @@
+import {silhouetteTopology} from './mesh-topology.js';
 // Pure pixel/rig operations shared by the browser and artifact verification.
 const round=n=>Math.round(n*10000)/10000;
 const D2R=Math.PI/180;
@@ -306,7 +307,7 @@ function guideWeights(guide,x,y){
     weights.push([guide.names[i],remaining*(1-t)]);remaining*=t;
   }
   weights.push([guide.names.at(-1),remaining]);
-  const kept=weights.filter(([,w])=>w>1e-6).sort((a,b)=>b[1]-a[1]).slice(0,4),total=kept.reduce((n,[,w])=>n+w,0);
+  const kept=weights.filter(([,w])=>w>=.005).sort((a,b)=>b[1]-a[1]).slice(0,4),total=kept.reduce((n,[,w])=>n+w,0);
   return kept.map(([id,w])=>[id,w/total]);
 }
 // Joint-aligned rows and columns put vertices at the pivots and both sides of each blend band.
@@ -320,17 +321,19 @@ function meshAxis(size,offset,joints,key){
 }
 export function buildMesh(layer,rig,mode,bone,setup){
   const guide=weightGuide(layer,rig,mode,bone,layer.x+layer.width/2,layer.y+layer.height/2);
+  const topology=silhouetteTopology(layer,guide.joints);
   const xs=meshAxis(layer.width,layer.x,guide.joints,'x'),ys=meshAxis(layer.height,layer.y,guide.joints,'y');
   const nx=xs.length-1,ny=ys.length-1,grid=[],lookup=new Map(),root=rig.points.root;
   const add=(x,y)=>{const key=`${x},${y}`;if(!lookup.has(key)){lookup.set(key,grid.length);grid.push([x,y]);}};
-  for(let x=0;x<=nx;x++)add(x,0);for(let y=1;y<=ny;y++)add(nx,y);for(let x=nx-1;x>=0;x--)add(x,ny);for(let y=ny-1;y>0;y--)add(0,y);const hull=grid.length;
+  for(let x=0;x<=nx;x++)add(x,0);for(let y=1;y<=ny;y++)add(nx,y);for(let x=nx-1;x>=0;x--)add(x,ny);for(let y=ny-1;y>0;y--)add(0,y);let hull=grid.length;
   for(let y=1;y<ny;y++)for(let x=1;x<nx;x++)add(x,y);
-  const uvs=[],vertices=[],triangles=[];
-  for(const [gx,gy]of grid){const u=xs[gx]/layer.width,v=ys[gy]/layer.height,x=layer.x+xs[gx],y=layer.y+ys[gy];uvs.push(u,v);
+  const coords=topology?.points||grid.map(([x,y])=>[xs[x],ys[y]]),uvs=[],vertices=[],triangles=topology?.triangles||[];
+  if(topology)hull=topology.hull;
+  for(const [lx0,ly0]of coords){const x=layer.x+lx0,y=layer.y+ly0;uvs.push(lx0/layer.width,ly0/layer.height);
     const g=mode==='legs'||mode==='feet'?weightGuide(layer,rig,mode,bone,x,y):guide;
     const weights=guideWeights(g,x,y);vertices.push(weights.length);
     for(const [b,w]of weights){const [lx,ly]=toLocal(setup.world,b,x-root.x,root.y-y);vertices.push(setup.order.indexOf(b),round(lx),round(ly),w);}}
-  for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){const a=lookup.get(`${x},${y}`),b=lookup.get(`${x+1},${y}`),c=lookup.get(`${x},${y+1}`),d=lookup.get(`${x+1},${y+1}`);if((x+y)%2)triangles.push(a,c,d,a,d,b);else triangles.push(a,c,b,b,c,d);}
+  if(!topology)for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){const a=lookup.get(`${x},${y}`),b=lookup.get(`${x+1},${y}`),c=lookup.get(`${x},${y+1}`),d=lookup.get(`${x+1},${y+1}`);triangles.push(a,c,b,b,c,d);}
   const pairs=new Set(),edges=[];for(let i=0;i<triangles.length;i+=3)for(const [a,b]of [[triangles[i],triangles[i+1]],[triangles[i+1],triangles[i+2]],[triangles[i+2],triangles[i]]]){const key=`${Math.min(a,b)},${Math.max(a,b)}`;if(!pairs.has(key)){pairs.add(key);edges.push(a*2,b*2);}}
   return {type:'mesh',uvs,vertices,triangles,hull,edges,width:layer.width,height:layer.height};
 }
@@ -446,3 +449,24 @@ export function upgradeRig(rig){
 export function addJointAt(rig,label,parent,x,y){const id=addJoint(rig,label,parent);rig.points[id]={x:clamp(x,0,rig.width),y:clamp(y,0,rig.height)};return id;}
 // Insert a joint between `child` and its current parent (e.g. upper body → [waist] → chest).
 export function insertJointAt(rig,label,child,x,y){if(child==='root'||!rig.points[child])throw Error('사이에 넣을 관절을 선택해주세요.');const parent=rig.parents[child],id=addJointAt(rig,label,parent,x,y);rig.parents[child]=id;return id;}
+
+// Repair only dark pixels near an alpha edge hidden behind another layer. Exterior outlines,
+// facial marks, alpha, and visible artwork are deliberately preserved. Uses nearby same-part fill.
+export function repairSeams(layers,width,height){
+  const masks=hiddenMasks(layers,width,height,220);let changed=0;
+  layers.forEach((l,index)=>{
+    if(!l.data||/eye|mouth|nose|brow|얼굴|눈|입|코/i.test(l.name))return;
+    const src=l.data.slice(),edge=edgeDistance({...l,data:src}),mask=masks[index].mask;
+    const lum=i=>src[i*4]*.2126+src[i*4+1]*.7152+src[i*4+2]*.0722;
+    const radius=Math.max(3,Math.min(12,Math.round(Math.min(l.width,l.height)*.06)));
+    for(let y=0;y<l.height;y++)for(let x=0;x<l.width;x++){const i=y*l.width+x;if(!mask[i]||src[i*4+3]<8||edge[i]>radius)continue;
+      let best=-1,score=Infinity;const dark=lum(i);
+      for(let dy=-radius;dy<=radius;dy++)for(let dx=-radius;dx<=radius;dx++){
+        const xx=x+dx,yy=y+dy;if(xx<0||yy<0||xx>=l.width||yy>=l.height)continue;const j=yy*l.width+xx,d=dx*dx+dy*dy;
+        if(d>radius*radius||src[j*4+3]<240||edge[j]<Math.min(radius*.6,edge[i]+1.5)||lum(j)<dark+25)continue;
+        const q=d+Math.max(0,radius-edge[j])*2;if(q<score){score=q;best=j;}
+      }
+      if(best>=0){for(let k=0;k<3;k++)l.data[i*4+k]=src[best*4+k];changed++;}
+    }
+  });return changed;
+}
