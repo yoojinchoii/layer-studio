@@ -67,8 +67,9 @@ export function inferRig(layers,width,height){
   }
   const assignments=layers.map(l=>{const n=l.name.toLowerCase(),part=n.match(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_([rl])(?:_\d+)?$/);
     if(part)return `${partBones[part[1]]}_${part[2]==='r'?'left':'right'}`;
+    const lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'hip':'ankle'}_${lower[2]==='r'?'left':'right'}`;
     if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/topwear|상의/.test(n))return 'chest';if(/handwear|^arm|팔/.test(n))return center(l)<cx?'arm_left':'arm_right';if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
-  const modes=layers.map((l,i)=>{const n=l.name.toLowerCase();if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
+  const modes=layers.map((l,i)=>{const n=l.name.toLowerCase(),lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'leg':'foot'}_${lower[2]==='r'?'left':'right'}`;if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
   return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,limbStyle:'mesh',weightBlend:{},ik:true};
 }
 // Pixel statistics for opaque pixels of a layer, in image coordinates (pixel centres).
@@ -100,12 +101,12 @@ export function refineRig(rig,layers){
       const from=Math.hypot(lo.x-c.x,lo.y-c.y)<=Math.hypot(hi.x-c.x,hi.y-c.y)?'lo':'hi';
       set(`arm_${side}`,sliceAt(pts,axis,from,.07));set(`elbow_${side}`,sliceAt(pts,axis,from,.45));set(`wrist_${side}`,sliceAt(pts,axis,from,.79));
     }
-    if(pass==='limbs'&&mode==='legs')for(const side of ['left','right']){
-      const pts=opaquePoints(l,x=>sideOf(x)===side,2);if(pts.length<20)continue;const axis=principalAxis(pts),from=axis.my+axis.dir.y*axis.lo<axis.my+axis.dir.y*axis.hi?'lo':'hi';
+    if(pass==='limbs'&&(mode==='legs'||mode.startsWith('leg_')))for(const side of mode==='legs'?['left','right']:[mode.slice(4)]){
+      const pts=opaquePoints(l,x=>mode!=='legs'||sideOf(x)===side,2);if(pts.length<20)continue;const axis=principalAxis(pts),from=axis.my+axis.dir.y*axis.lo<axis.my+axis.dir.y*axis.hi?'lo':'hi';
       set(`hip_${side}`,sliceAt(pts,axis,from,.05));set(`knee_${side}`,sliceAt(pts,axis,from,.5));set(`ankle_${side}`,sliceAt(pts,axis,from,.97));
     }
-    if(pass==='feet'&&mode==='feet')for(const side of ['left','right']){
-      const pts=opaquePoints(l,x=>sideOf(x)===side,1);if(pts.length<20)continue;let top=Infinity,bottom=-Infinity;for(const [,y]of pts){top=Math.min(top,y);bottom=Math.max(bottom,y);}
+    if(pass==='feet'&&(mode==='feet'||mode.startsWith('foot_')))for(const side of mode==='feet'?['left','right']:[mode.slice(5)]){
+      const pts=opaquePoints(l,x=>mode!=='feet'||sideOf(x)===side,1);if(pts.length<20)continue;let top=Infinity,bottom=-Infinity;for(const [,y]of pts){top=Math.min(top,y);bottom=Math.max(bottom,y);}
       const y=top+(bottom-top)*.35,band=pts.filter(p=>Math.abs(p[1]-y)<=Math.max(2,(bottom-top)*.05));if(!band.length)continue;
       set(`ankle_${side}`,{x:band.reduce((s,p)=>s+p[0],0)/band.length,y});
     }
@@ -160,8 +161,8 @@ const LIMBS={arm:{joints:['arm','elbow','wrist'],names:['upper_arm','forearm','h
 // The cap of the front (distal) piece fades out, softening the seam. Cap pixels are flagged in `fill`
 // so the server can redraw them (the original pixels there belong to the neighbouring piece).
 export function splitLimb(layer,rig,mode){
-  const kind=mode==='arm_left'||mode==='arm_right'?'arm':mode==='legs'?'leg':mode==='feet'?'feet':null;if(!kind||!layer.data)return null;
-  const P=rig.points,{joints,names}=LIMBS[kind],sides=kind==='arm'?[mode.slice(4)]:['left','right'],W=layer.width,H=layer.height;
+  const kind=mode==='arm_left'||mode==='arm_right'?'arm':mode==='legs'||mode.startsWith('leg_')?'leg':mode==='feet'||mode.startsWith('foot_')?'feet':null;if(!kind||!layer.data)return null;
+  const P=rig.points,{joints,names}=LIMBS[kind],sides=mode.endsWith('_left')?['left']:mode.endsWith('_right')?['right']:['left','right'],W=layer.width,H=layer.height;
   const chains=[];
   for(const side of sides){
     const ids=joints.map(j=>`${j}_${side}`);if(ids.some(id=>!P[id]))return null;const pts=ids.map(id=>P[id]);
@@ -450,16 +451,25 @@ export function addJointAt(rig,label,parent,x,y){const id=addJoint(rig,label,par
 // Insert a joint between `child` and its current parent (e.g. upper body → [waist] → chest).
 export function insertJointAt(rig,label,child,x,y){if(child==='root'||!rig.points[child])throw Error('사이에 넣을 관절을 선택해주세요.');const parent=rig.parents[child],id=addJointAt(rig,label,parent,x,y);rig.parents[child]=id;return id;}
 
-// Repair only dark pixels near an alpha edge hidden behind another layer. Exterior outlines,
-// facial marks, alpha, and visible artwork are deliberately preserved. Uses nearby same-part fill.
+// Repair dark part-edge lines at hidden overlaps and visible internal contacts. The composite
+// silhouette and facial features stay protected; fill comes from the same part, never the neighbour.
 export function repairSeams(layers,width,height){
-  const masks=hiddenMasks(layers,width,height,220);let changed=0;
+  const masks=hiddenMasks(layers,width,height,220),union=new Uint8ClampedArray(width*height*4);let changed=0;
+  for(const l of layers)if(l.data&&l.visible!==false)for(let y=0;y<l.height;y++)for(let x=0;x<l.width;x++){
+    const gx=Math.round(l.x+x),gy=Math.round(l.y+y);if(gx>=0&&gy>=0&&gx<width&&gy<height){const g=(gy*width+gx)*4+3;union[g]=Math.max(union[g],l.data[(y*l.width+x)*4+3]*(l.opacity??1));}}
+  const outer=edgeDistance({width,height,data:union});
+  const necks=layers.filter(l=>/^(neck|목)(?:$|[_ -])/i.test(l.name));
+  const onNeck=(x,y)=>necks.some(l=>{const xx=Math.floor(x-l.x),yy=Math.floor(y-l.y);return xx>=0&&yy>=0&&xx<l.width&&yy<l.height&&l.data[(yy*l.width+xx)*4+3]>64;});
   layers.forEach((l,index)=>{
-    if(!l.data||/eye|mouth|nose|brow|얼굴|눈|입|코/i.test(l.name))return;
+    if(!l.data||l.visible===false||/eye|irides|mouth|nose|brow|눈|입|코/i.test(l.name))return;
     const src=l.data.slice(),edge=edgeDistance({...l,data:src}),mask=masks[index].mask;
     const lum=i=>src[i*4]*.2126+src[i*4+1]*.7152+src[i*4+2]*.0722;
     const radius=Math.max(3,Math.min(12,Math.round(Math.min(l.width,l.height)*.06)));
-    for(let y=0;y<l.height;y++)for(let x=0;x<l.width;x++){const i=y*l.width+x;if(!mask[i]||src[i*4+3]<8||edge[i]>radius)continue;
+    const surface=/topwear|bottomwear|handwear|legwear|footwear|neck|arm|leg|foot|shoe|상의|하의|팔|다리|신발|목/i.test(l.name),face=/^(face|얼굴)$/i.test(l.name);
+    for(let y=0;y<l.height;y++)for(let x=0;x<l.width;x++){const i=y*l.width+x,gx=Math.round(l.x+x),gy=Math.round(l.y+y);
+      const interior=gx>=0&&gy>=0&&gx<width&&gy<height&&outer[gy*width+gx]>radius;
+      const contact=interior&&(surface||face&&y>l.height*.65&&onNeck(gx,gy));
+      if((!mask[i]&&!contact)||src[i*4+3]<8||edge[i]>radius)continue;
       let best=-1,score=Infinity;const dark=lum(i);
       for(let dy=-radius;dy<=radius;dy++)for(let dx=-radius;dx<=radius;dx++){
         const xx=x+dx,yy=y+dy;if(xx<0||yy<0||xx>=l.width||yy>=l.height)continue;const j=yy*l.width+xx,d=dx*dx+dy*dy;
@@ -469,4 +479,15 @@ export function repairSeams(layers,width,height){
       if(best>=0){for(let k=0;k<3;k++)l.data[i*4+k]=src[best*4+k];changed++;}
     }
   });return changed;
+}
+
+export function splitLegLayers(layers,rig){
+  const out=[],assignments=[],modes=[];let changed=false;
+  layers.forEach((l,i)=>{
+    const mode=rig.modes[i],sides=(mode==='legs'||mode==='feet')&&l.data?splitMeshSides(l,rig,mode):null;
+    if(sides?.length===2){changed=true;for(const p of sides){out.push({...p,id:l.id?`${l.id}_${p.mode.endsWith('_left')?'R':'L'}`:undefined,sourceIndex:i});assignments.push(p.bone);modes.push(p.mode);}}
+    else {out.push({...l,sourceIndex:i});assignments.push(rig.assignments[i]);modes.push(mode);}
+  });
+  if(changed){rig.assignments=assignments;rig.modes=modes;}
+  return {layers:out,changed};
 }

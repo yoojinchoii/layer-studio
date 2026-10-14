@@ -170,3 +170,21 @@ test('internal seam cleanup repairs hidden dark edges while preserving alpha and
   assert.ok(arm.data[(1*30+15)*4]>100);assert.equal(arm.data[(20*30)*4],20);
   for(let i=3;i<arm.data.length;i+=4)assert.equal(arm.data[i],original[i]);
 });
+test('visible contact lines are repaired, while the outer silhouette and eye detail stay intact',async()=>{
+  const {repairSeams}=await import('./rig-core.js');
+  const shirt=layer('topwear',5,20,30,20,()=>true),neck=layer('neck',5,0,30,35,()=>true),eye=layer('eye',15,3,3,3,()=>true);
+  for(const l of [shirt,neck])for(let i=0;i<l.data.length;i+=4)l.data.set(l===shirt?[60,145,150,255]:[230,190,150,255],i);
+  for(let x=0;x<30;x++)for(let y=0;y<2;y++)shirt.data.set([15,25,25,255],(y*30+x)*4);
+  const beforeEye=eye.data.slice();assert.ok(repairSeams([eye,shirt,neck],40,45)>0);
+  assert.ok(shirt.data[15*4+1]>100,'front visible seam remains dark');assert.equal(shirt.data[1],25,'outer silhouette was recolored');assert.deepEqual(eye.data,beforeEye);
+});
+test('splitting source leg layers is lossless, idempotent, and preserves joint pose',async()=>{
+  const {splitLegLayers}=await import('./rig-core.js');
+  const l=layer('legwear',100,120,200,250,x=>x<150||x>250);l.id='source';const rig=inferRig([l],400,400);rig.pose.knee_left=30;
+  const first=splitLegLayers([l],rig);assert.ok(first.changed);assert.deepEqual(first.layers.map(l=>l.name),['legwear_R','legwear_L']);assert.deepEqual(rig.modes,['leg_left','leg_right']);assert.equal(rig.pose.knee_left,30);
+  const composite=new Uint8ClampedArray(l.data.length);
+  for(const p of first.layers)for(let y=0;y<p.height;y++)for(let x=0;x<p.width;x++)if(p.data[(y*p.width+x)*4+3])composite.set(p.data.subarray((y*p.width+x)*4,(y*p.width+x)*4+4),((y+p.y-l.y)*l.width+x+p.x-l.x)*4);
+  assert.deepEqual(composite,l.data);assert.equal(splitLegLayers(first.layers,rig).changed,false);
+  const inferred=inferRig(first.layers,400,400);assert.deepEqual(inferred.modes,['leg_left','leg_right']);
+  for(const style of ['mesh','cutout']){rig.limbStyle=style;const parts=buildParts(first.layers,rig);assert.ok(parts.length>=2);makeSkeleton(parts,rig);}
+});

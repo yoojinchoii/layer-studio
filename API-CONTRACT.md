@@ -87,3 +87,10 @@ Reference projects were analyzed locally (five files, including two 4.1.21 proje
 Bridge v2 supports `/sync` (same validated ZIP transport, no user download) to an ID-scoped `Previews/Live/<uuid>/` folder. The browser debounces edits, serializes requests, and stops automatic sync on failure. `/open-live` compiles current JSON into the same `preview.spine`, retaining one `previous.spine`. A stored hash prevents overwriting a project saved by Spine. Unsaved editor state cannot be detected; native open does not guarantee reloading an already open document. Image file changes are supported by Spine's image watcher; bone/mesh/weight changes need reopen/import. No bidirectional editing or undocumented editor injection is claimed.
 
 `/studio/` serves the bundled same-origin editor from loopback for browsers that block HTTPS-to-loopback. Static paths are allowlisted; mutation paths still require exact Host, Origin (or same-origin Fetch Metadata), and the custom header. Cloud and local browser storage are separate. Automatic sync never invokes AI or downloads repeated ZIP files.
+
+
+## Visible contact seams and editable left/right legs
+
+`repairSeams` now checks composite silhouette distance as well as occlusion. Visible dark edge pixels at internal clothing/limb contacts are filled from the same part; chin correction is limited to contact with a neck layer. Outer silhouette and eye/mouth detail layers remain protected. The main layer view receives the same processed canvases used by rig/export. A main-panel action runs this local correction without AI pose or inpaint calls.
+
+Bilateral legwear/footwear source layers become independently editable R/L layers on PSD/sample/AI import. Saved rig projects migrate these layers while retaining authored joints, poses, assignments and per-joint settings. Explicit side modes survive mesh/cutout export and PSD reimport, and repeated splitting is a no-op. Pixel placement and alpha are preserved by the split; contact correction is a separate operation.
