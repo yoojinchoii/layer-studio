@@ -129,7 +129,13 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   function setPoint(x,y){if(!Number.isFinite(x)||!Number.isFinite(y))return;const {width,height}=project.rig;project.rig.points[selected()]={x:Math.max(0,Math.min(width,x)),y:Math.max(0,Math.min(height,y))};dirty();fields();}
   const mouse=e=>{const r=$('rigCanvas').getBoundingClientRect();return {x:(e.clientX-r.left)/r.width*project.rig.width,y:(e.clientY-r.top)/r.height*project.rig.height};};
   $('rigCanvas').onpointerdown=e=>{if(!project||playing)return;if(placing){const pos=mouse(e);placing=false;$('rigAdd').classList.remove('primary');try{remember();const between=$('rigInsertMode').value==='between',id=(between?insertJointAt:addJointAt)(project.rig,$('rigJointName').value,selected(),pos.x,pos.y);$('rigJointName').value='';dirty();menus(id);message(`'${project.rig.labels[id]}' 관절을 추가했어요. 아래 '파츠와 관절 연결'에서 이 관절로 움직일 파츠를 지정하세요.`);}catch(err){message(err.message);}return;}const pos=mouse(e),points=jointPositions(),radius=16*project.rig.width/$('rigCanvas').getBoundingClientRect().width;let nearest=null,best=radius;for(const [id,p]of Object.entries(points)){if(id==='root')continue;const dist=Math.hypot(pos.x-p.x,pos.y-p.y);if(dist<best){nearest=id;best=dist;}}
-    if(nearest){$('rigBone').value=nearest;fields();}if(poseMode()){if(nearest)message('각도 슬라이더로 선택한 관절을 굽혀보세요.');return;}if(!nearest)return;
+    if(nearest){
+      $('rigBone').value=nearest;
+      // Selecting a canvas joint also reveals its inspector and synchronizes the weight target.
+      const current=Number($('rigLayer').value),belongs=i=>partBoneCandidates(project.rig,i).includes(nearest);
+      if(!belongs(current)){const related=project.meta.findIndex((_,i)=>belongs(i));if(related>=0)$('rigLayer').value=String(related);}
+      fields();binding();$('rigTabJoints').click();$('rigPanelJoints').parentElement.scrollTop=0;
+    }if(poseMode()){if(nearest)message('각도 슬라이더로 선택한 관절을 굽혀보세요.');return;}if(!nearest)return;
     remember();drag={id:selected(),dx:project.rig.points[selected()].x-pos.x,dy:project.rig.points[selected()].y-pos.y};$('rigCanvas').setPointerCapture(e.pointerId);$('rigCanvas').focus();e.preventDefault();};
   $('rigCanvas').onpointermove=e=>{if(!drag)return;const p=mouse(e);setPoint(p.x+drag.dx,p.y+drag.dy);};
   const endDrag=e=>{if(!drag)return;drag=null;if($('rigCanvas').hasPointerCapture(e.pointerId))$('rigCanvas').releasePointerCapture(e.pointerId);status();};$('rigCanvas').onpointerup=endDrag;$('rigCanvas').onpointercancel=endDrag;
