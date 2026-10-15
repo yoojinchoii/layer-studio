@@ -94,3 +94,11 @@ Bridge v2 supports `/sync` (same validated ZIP transport, no user download) to a
 `repairSeams` now checks composite silhouette distance as well as occlusion. Visible dark edge pixels at internal clothing/limb contacts are filled from the same part; chin correction is limited to contact with a neck layer. Outer silhouette and eye/mouth detail layers remain protected. The main layer view receives the same processed canvases used by rig/export. A main-panel action runs this local correction without AI pose or inpaint calls.
 
 Bilateral legwear/footwear source layers become independently editable R/L layers on PSD/sample/AI import. Saved rig projects migrate these layers while retaining authored joints, poses, assignments and per-joint settings. Explicit side modes survive mesh/cutout export and PSD reimport, and repeated splitting is a no-op. Pixel placement and alpha are preserved by the split; contact correction is a separate operation.
+
+### Sparse mesh and per-sprite influences (2026-10-15)
+
+- `rig.meshDensity` is `simple`, `balanced` (default), or `fine`. Circumscribed silhouette supports preserve painted pixels; only bend rows add interior points. No uniform interior grid.
+- `rig.partBones` maps source layer indices to allowed rig joint IDs, intersected with that sprite's own limb chain. Missing entries use its chain. Vertices retain at most two neighbouring direct influences, renormalized to one. Rigid attachments keep their single attachment bone. Parent-bone transforms still propagate normally.
+- Editable project JSON preserves both fields. Lower-limb splitting remaps per-layer selections; deleting a custom joint removes stale selections.
+- Inspector tabs keep the viewport and save controls fixed. Mesh edges show for the selected sprite; weight dots show only on sprites with a nonzero influence from the selected bone. Zoom and solo are preview-only.
+- Local reference analysis: chef median 26 vertices (70 meshes); Kathy median 22.5 (38 meshes). These are design references, not universal vertex limits. Source artwork and reference projects are not bundled.

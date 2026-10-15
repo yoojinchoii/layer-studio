@@ -203,3 +203,19 @@ test('splitting source leg layers is lossless, idempotent, and preserves joint p
   const inferred=inferRig(first.layers,400,400);assert.deepEqual(inferred.modes,['leg_left','leg_right']);
   for(const style of ['mesh','cutout']){rig.limbStyle=style;const parts=buildParts(first.layers,rig);assert.ok(parts.length>=2);makeSkeleton(parts,rig);}
 });
+
+test('per-sprite bone restrictions are normalized and unrelated limbs never influence it',async()=>{
+  const {vertexWeights}=await import('./rig-core.js');const rig=armRig(),arm=layer('handwear-r',90,90,20,250,()=>true);rig.modes=['arm_left'];rig.assignments=['arm_left'];
+  rig.partBones={0:['elbow_left','wrist_left']};const parts=buildParts([arm],rig),sk=makeSkeleton(parts,rig),a=sk.skins[0].attachments[parts[0].slot][parts[0].slot];
+  assert.ok(vertexWeights(a,sk,'upper_arm_R').every(w=>w===0));assert.ok(vertexWeights(a,sk,'upper_arm_L').every(w=>w===0));
+  const fore=vertexWeights(a,sk,'forearm_R'),hand=vertexWeights(a,sk,'hand_R');for(let i=0;i<fore.length;i++)assert.ok(near(fore[i]+hand[i],1,1e-9));
+  let cursor=0;for(let i=0;i<a.uvs.length/2;i++){const n=a.vertices[cursor++];assert.ok(n<=2);cursor+=n*4;}
+  const right=poseMatrices(sk,null,{upper_arm_L:80});assert.deepEqual(meshWorldVertices(a,sk,right),meshWorldVertices(a,sk,poseMatrices(sk)));
+  const saved=JSON.parse(JSON.stringify(rig));assert.deepEqual(makeSkeleton(buildParts([arm],saved),saved).skins,sk.skins);
+});
+test('coarse and balanced mesh envelopes retain curved painted silhouettes with fewer vertices',async()=>{
+  const {silhouetteTopology}=await import('./mesh-topology.js');const l=layer('arm',0,0,60,180,(x,y)=>((x-30)/27)**2+((y-90)/88)**2<1);
+  const joints=[{p:{x:30,y:60},dir:{x:0,y:1},band:12},{p:{x:30,y:130},dir:{x:0,y:1},band:12}];
+  const basic=silhouetteTopology(l,joints,'balanced'),fine=silhouetteTopology(l,joints,'fine');assert.ok(basic.points.length<=36);assert.ok(fine.points.length>basic.points.length);
+  for(const mode of ['simple','balanced','fine']){const m=silhouetteTopology(l,joints,mode),h=m.points.slice(0,m.hull);for(let y=0;y<180;y++)for(let x=0;x<60;x++)if(l.data[(y*60+x)*4+3])for(let i=0;i<h.length;i++){const a=h[i],b=h[(i+1)%h.length];assert.ok((b[0]-a[0])*(y+.5-a[1])-(b[1]-a[1])*(x+.5-a[0])>=-1e-5);}}
+});

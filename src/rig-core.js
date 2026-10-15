@@ -70,7 +70,7 @@ export function inferRig(layers,width,height){
     const lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'hip':'ankle'}_${lower[2]==='r'?'left':'right'}`;
     if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/topwear|상의/.test(n))return 'chest';if(/handwear|^arm|팔/.test(n))return center(l)<cx?'arm_left':'arm_right';if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
   const modes=layers.map((l,i)=>{const n=l.name.toLowerCase(),lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'leg':'foot'}_${lower[2]==='r'?'left':'right'}`;if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
-  return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,limbStyle:'mesh',weightBlend:{},ik:true};
+  return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,limbStyle:'mesh',weightBlend:{},partBones:{},meshDensity:'balanced',ik:true};
 }
 // Pixel statistics for opaque pixels of a layer, in image coordinates (pixel centres).
 function opaquePoints(layer,keep=()=>true,stride=1){
@@ -120,7 +120,7 @@ export function boneOrder(rig){
 }
 export function setParent(rig,name,parent){if(name==='root'||name===parent||!rig.points[parent])throw Error('부모 관절을 확인해주세요.');const old=rig.parents[name];rig.parents[name]=parent;try{boneOrder(rig);}catch(e){rig.parents[name]=old;throw e;}}
 export function addJoint(rig,label,parent){if(Object.keys(rig.points).length>=64)throw Error('관절은 최대 64개까지 추가할 수 있어요.');let n=1;while(rig.points[`joint_${n}`])n++;const id=`joint_${n}`,p=rig.points[parent]||rig.points.body;rig.points[id]={x:clamp(p.x+30,0,rig.width),y:clamp(p.y+30,0,rig.height)};rig.parents[id]=rig.points[parent]?parent:'body';rig.labels[id]=label.trim()||`추가 관절 ${n}`;return id;}
-export function deleteJoint(rig,id){if(boneLabels[id])throw Error('기본 관절은 삭제할 수 없어요.');const parent=rig.parents[id];for(const k in rig.parents)if(rig.parents[k]===id)rig.parents[k]=parent;rig.assignments=rig.assignments.map(x=>x===id?parent:x);delete rig.points[id];delete rig.parents[id];delete rig.labels[id];delete rig.pose[id];if(rig.weightBlend)delete rig.weightBlend[id];}
+export function deleteJoint(rig,id){if(boneLabels[id])throw Error('기본 관절은 삭제할 수 없어요.');const parent=rig.parents[id];for(const k in rig.parents)if(rig.parents[k]===id)rig.parents[k]=parent;rig.assignments=rig.assignments.map(x=>x===id?parent:x);delete rig.points[id];delete rig.parents[id];delete rig.labels[id];delete rig.pose[id];if(rig.weightBlend)delete rig.weightBlend[id];if(rig.partBones)for(const k of Object.keys(rig.partBones)){rig.partBones[k]=rig.partBones[k].filter(b=>b!==id);if(!rig.partBones[k].length)delete rig.partBones[k];}}
 // Setup pose: every limb bone points at its next joint so Spine shows real bone lengths and IK can bend them.
 function nextJoint(id){const m=id.match(/^(arm|elbow|hip|knee)_(left|right)$/);if(m)return `${{arm:'elbow',elbow:'wrist',hip:'knee',knee:'ankle'}[m[1]]}_${m[2]}`;return {body:'chest',upper:'chest',chest:'neck',neck:'head'}[id];}
 export function setupPose(rig){
@@ -285,6 +285,10 @@ function meshChain(rig,mode,x,y){
   return out;
 }
 const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
+export function partBoneCandidates(rig,index,mode=rig.modes[index],bone=rig.assignments[index]){
+  if(mode==='rigid')return [bone];
+  const p=rig.points[bone]||{x:0,y:0};return [...new Set(meshChain(rig,mode,p.x,p.y))];
+}
 function weightGuide(layer,rig,mode,bone,x,y){
   if(mode==='rigid')return {names:[bone],joints:[]};
   const names=meshChain(rig,mode,x,y),points=names.map(id=>rig.points[id]),joints=[];
@@ -299,7 +303,8 @@ function weightGuide(layer,rig,mode,bone,x,y){
     const band=clamp((thickness===null?Math.min(len,after)*.12:Math.max(2,thickness)*1.25)*blend,1,maxBand);
     joints.push({id:names[i],p,dir,band});
   }
-  return {names,joints};
+  const requested=rig.partBones?.[layer.source],allowed=Array.isArray(requested)?names.filter(n=>requested.includes(n)):names;
+  return {names,joints,allowed:allowed.length?allowed:names,points};
 }
 function guideWeights(guide,x,y){
   const weights=[];let remaining=1;
@@ -308,7 +313,12 @@ function guideWeights(guide,x,y){
     weights.push([guide.names[i],remaining*(1-t)]);remaining*=t;
   }
   weights.push([guide.names.at(-1),remaining]);
-  const kept=weights.filter(([,w])=>w>=.005).sort((a,b)=>b[1]-a[1]).slice(0,4),total=kept.reduce((n,[,w])=>n+w,0);
+  // Each vertex blends at most two neighbouring bones of this sprite's chain.
+  let primary=0;for(let i=1;i<weights.length;i++)if(weights[i][1]>weights[primary][1])primary=i;
+  const neighbour=primary===0?1:primary===weights.length-1?primary-1:weights[primary-1][1]>weights[primary+1][1]?primary-1:primary+1;
+  let kept=weights.filter(([id,w],i)=>(i===primary||i===neighbour)&&w>=.005&&(!guide.allowed||guide.allowed.includes(id)));
+  if(!kept.length){const choices=guide.names.map((id,i)=>({id,p:guide.points?.[i]})).filter(v=>!guide.allowed||guide.allowed.includes(v.id));choices.sort((a,b)=>Math.hypot(x-a.p.x,y-a.p.y)-Math.hypot(x-b.p.x,y-b.p.y));kept=[[choices[0].id,1]];}
+  const total=kept.reduce((n,[,w])=>n+w,0);
   return kept.map(([id,w])=>[id,w/total]);
 }
 // Joint-aligned rows and columns put vertices at the pivots and both sides of each blend band.
@@ -322,7 +332,7 @@ function meshAxis(size,offset,joints,key){
 }
 export function buildMesh(layer,rig,mode,bone,setup){
   const guide=weightGuide(layer,rig,mode,bone,layer.x+layer.width/2,layer.y+layer.height/2);
-  const topology=silhouetteTopology(layer,guide.joints);
+  const topology=silhouetteTopology(layer,guide.joints,rig.meshDensity);
   const xs=meshAxis(layer.width,layer.x,guide.joints,'x'),ys=meshAxis(layer.height,layer.y,guide.joints,'y');
   const nx=xs.length-1,ny=ys.length-1,grid=[],lookup=new Map(),root=rig.points.root;
   const add=(x,y)=>{const key=`${x},${y}`;if(!lookup.has(key)){lookup.set(key,grid.length);grid.push([x,y]);}};
@@ -492,6 +502,6 @@ export function splitLegLayers(layers,rig){
     if(sides?.length===2){changed=true;for(const p of sides){out.push({...p,id:l.id?`${l.id}_${p.mode.endsWith('_left')?'R':'L'}`:undefined,sourceIndex:i});assignments.push(p.bone);modes.push(p.mode);}}
     else {out.push({...l,sourceIndex:i});assignments.push(rig.assignments[i]);modes.push(mode);}
   });
-  if(changed){rig.assignments=assignments;rig.modes=modes;}
+  if(changed){const previous=rig.partBones||{};rig.partBones=Object.fromEntries(out.flatMap((l,i)=>previous[l.sourceIndex]?[[i,[...previous[l.sourceIndex]]]]:[]));rig.assignments=assignments;rig.modes=modes;}
   return {layers:out,changed};
 }
