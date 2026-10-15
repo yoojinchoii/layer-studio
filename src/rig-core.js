@@ -1,3 +1,4 @@
+import {separateSleeve} from './garment-parts.js';
 import {silhouetteTopology} from './mesh-topology.js';
 // Pure pixel/rig operations shared by the browser and artifact verification.
 const round=n=>Math.round(n*10000)/10000;
@@ -68,7 +69,7 @@ export function inferRig(layers,width,height){
   const assignments=layers.map(l=>{const n=l.name.toLowerCase(),part=n.match(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_([rl])(?:_\d+)?$/);
     if(part)return `${partBones[part[1]]}_${part[2]==='r'?'left':'right'}`;
     const lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'hip':'ankle'}_${lower[2]==='r'?'left':'right'}`;
-    if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/topwear|상의/.test(n))return 'chest';if(/handwear|^arm|팔/.test(n))return center(l)<cx?'arm_left':'arm_right';if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
+    if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/topwear|상의|^sleeve_[rl]$/.test(n))return 'chest';if(/handwear|^arm|팔/.test(n))return center(l)<cx?'arm_left':'arm_right';if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
   const modes=layers.map((l,i)=>{const n=l.name.toLowerCase(),lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'leg':'foot'}_${lower[2]==='r'?'left':'right'}`;if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
   return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,limbStyle:'mesh',weightBlend:{},partBones:{},meshDensity:'balanced',ik:true};
 }
@@ -241,12 +242,16 @@ const slug=s=>String(s).replace(/[^\p{L}\p{N}_-]+/gu,'_').replace(/^_+|_+$/g,'')
 // Layers (front-to-back, with RGBA data) become Spine parts: limbs are cut at joints in cutout style.
 export function buildParts(layers,rig){
   const cutout=(rig.limbStyle??'cutout')==='cutout',parts=[],used=new Map();
-  layers.forEach((l,i)=>{
-    const mode=rig.modes[i],split=cutout&&mode!=='rigid'?splitLimb(l,rig,mode):null;
-    const sides=!cutout&&(mode==='legs'||mode==='feet')&&l.data?splitMeshSides(l,rig,mode):null;
-    if(sides?.length)parts.push(...sides.map(p=>({...p,source:i})));
-    else if(split?.length)parts.push(...split.map(p=>({...p,source:i})));
-    else parts.push({...l,source:i,bone:rig.assignments[i],mode:cutout?'rigid':mode});
+  layers.forEach((original,i)=>{
+    const separated=separateSleeve(original,rig,i);
+    for(const l of separated||[original]){
+      const mode=l.role==='sleeve'?'rigid':rig.modes[i],bone=l.role==='sleeve'?'chest':rig.assignments[i];
+      const split=cutout&&mode!=='rigid'?splitLimb(l,rig,mode):null;
+      const sides=!cutout&&(mode==='legs'||mode==='feet')&&l.data?splitMeshSides(l,rig,mode):null;
+      if(sides?.length)parts.push(...sides.map(p=>({...p,source:i})));
+      else if(split?.length)parts.push(...split.map(p=>({...p,source:i})));
+      else parts.push({...l,source:i,bone,mode:cutout?'rigid':mode});
+    }
   });
   for(const p of parts){const base=slug(p.name),n=(used.get(base)||0)+1;used.set(base,n);p.slot=n>1?`${base}_${n}`:base;}
   return parts;
@@ -502,6 +507,6 @@ export function splitLegLayers(layers,rig){
     if(sides?.length===2){changed=true;for(const p of sides){out.push({...p,id:l.id?`${l.id}_${p.mode.endsWith('_left')?'R':'L'}`:undefined,sourceIndex:i});assignments.push(p.bone);modes.push(p.mode);}}
     else {out.push({...l,sourceIndex:i});assignments.push(rig.assignments[i]);modes.push(mode);}
   });
-  if(changed){const previous=rig.partBones||{};rig.partBones=Object.fromEntries(out.flatMap((l,i)=>previous[l.sourceIndex]?[[i,[...previous[l.sourceIndex]]]]:[]));rig.assignments=assignments;rig.modes=modes;}
+  if(changed){if(rig.sleeves)rig.sleeves=Object.fromEntries(out.flatMap((l,i)=>rig.sleeves[l.sourceIndex]?[[i,rig.sleeves[l.sourceIndex]]]:[]));const previous=rig.partBones||{};rig.partBones=Object.fromEntries(out.flatMap((l,i)=>previous[l.sourceIndex]?[[i,[...previous[l.sourceIndex]]]]:[]));rig.assignments=assignments;rig.modes=modes;}
   return {layers:out,changed};
 }
