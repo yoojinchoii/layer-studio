@@ -3,6 +3,7 @@ import {auditRig} from './rig-audit.js';
 import {initSleeves,suggestSleeve,cuffLine} from './garment-parts.js';
 import {installSpinePreview} from './spine-preview.js';
 import {partBoneCandidates,cleanPixels,repairSeams,splitLegLayers,inferRig,refineRig,buildParts,applyPose,applyFill,hiddenMasks,matchOriginal,centerJoints,attachProps,makeSkeleton,poseMatrices,boneLabels,meshWorldVertices,vertexWeights,regionMatrix,mul,spineName,animationNames,addJoint,addJointAt,insertJointAt,upgradeRig,deleteJoint,setParent,boneOrder} from './rig-core.js';
+import {repairNeckGap} from './neck-gap.js';
 import {packAtlas,encodePNG} from './spine-export.js';
 import {zipSync,strToU8} from 'fflate';
 import {writePsd} from 'ag-psd';
@@ -73,7 +74,8 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   async function cleanup(){
     stop();processing=true;$('rigProjectOpen').disabled=true;const next=[];let removed=0;for(const id of ['rigClean','rigSave','rigApply','rigProjectSave','rigSpinePreview'])$(id).disabled=true;
     try{for(const l of project.source){const c=canvas(l.canvas.width,l.canvas.height),ctx=c.getContext('2d');ctx.drawImage(l.canvas,0,0);const pixels=ctx.getImageData(0,0,c.width,c.height),r=cleanPixels(pixels.data,c.width,c.height,Number($('rigStrength').value));pixels.data.set(r.data);ctx.putImageData(pixels,0,0);removed+=r.removed;next.push({...l,canvas:c});await new Promise(r=>setTimeout(r,0));}const ref=state.reference;if(ref&&ref.width===project.rig.width&&ref.height===project.rig.height){const datas=next.map(l=>{const ctx=l.canvas.getContext('2d');return {ctx,img:ctx.getImageData(0,0,l.canvas.width,l.canvas.height)};});matchOriginal(next.map((l,i)=>({...l,width:l.canvas.width,height:l.canvas.height,data:datas[i].img.data})),{width:ref.width,height:ref.height,data:ref.getContext('2d').getImageData(0,0,ref.width,ref.height).data});datas.forEach(d=>d.ctx.putImageData(d.img,0,0));}
-    if($('rigSeams').checked){const datas=next.map(l=>({ctx:l.canvas.getContext('2d'),img:l.canvas.getContext('2d').getImageData(0,0,l.canvas.width,l.canvas.height)}));project.seamPixels=repairSeams(next.map((l,i)=>({...project.meta[i],data:datas[i].img.data})),project.rig.width,project.rig.height);datas.forEach(d=>d.ctx.putImageData(d.img,0,0));}
+    project.neckGapPixels=0;
+    if($('rigSeams').checked){const datas=next.map(l=>({ctx:l.canvas.getContext('2d'),img:l.canvas.getContext('2d').getImageData(0,0,l.canvas.width,l.canvas.height)})),layers=next.map((l,i)=>({...metadata(l),data:datas[i].img.data}));project.neckGapPixels=repairNeckGap(layers,project.rig.width,project.rig.height);project.seamPixels=repairSeams(layers,project.rig.width,project.rig.height);datas.forEach(d=>d.ctx.putImageData(d.img,0,0));}
     project.layers=next;project.removed=removed;project.cleanVersion=(project.cleanVersion||0)+1;state.layers=next;state.view='composite';render();dirty();status();draw();}
     finally{processing=false;$('rigProjectOpen').disabled=state.busy;for(const id of ['rigClean','rigSave','rigApply','rigProjectSave','rigSpinePreview'])$(id).disabled=false;}
   }
@@ -263,7 +265,7 @@ manual_pose: 웹에서 맞춘 포즈.
   $('rigAnim').replaceChildren(...Object.entries(animationNames).map(([k,v])=>new Option(v,k)));
   spinePreview=installSpinePreview({download,canSend:()=>!!project&&!processing&&!state.busy,snapshot:()=>({name:state.name,projectId:project.syncId??=crypto.randomUUID(),skeleton:skeleton(),parts:parts()})});
   $('rigDialog').addEventListener('close',()=>spinePreview.update());
-  $('autoRigBtn').onclick=prepare;return {prepare,snapshot:snapshotProject,restore:restoreProject,exportLayers:()=>currentProject()?parts():null,isProcessing:()=>processing,repair:async()=>{await prepare({detect:false});if(!project)return;$('rigSeams').checked=true;await cleanup();$('rigDialog').close();toast(`접합선 ${project.seamPixels||0}픽셀을 정리했어요. 레이어 PSD·PNG에도 반영됩니다.`);},update:()=>{$('autoRigBtn').disabled=state.busy||state.layers.length<2;$('rigProjectOpen').disabled=state.busy;spinePreview.update();}};
+  $('autoRigBtn').onclick=prepare;return {prepare,snapshot:snapshotProject,restore:restoreProject,exportLayers:()=>currentProject()?parts():null,isProcessing:()=>processing,repair:async()=>{await prepare({detect:false});if(!project)return;$('rigSeams').checked=true;await cleanup();$('rigDialog').close();toast(`접합선 ${project.seamPixels||0}픽셀 정리 · 목 빈틈 ${project.neckGapPixels||0}픽셀 보완. 레이어 PSD·PNG에도 반영됩니다.`);},update:()=>{$('autoRigBtn').disabled=state.busy||state.layers.length<2;$('rigProjectOpen').disabled=state.busy;spinePreview.update();}};
 }
 function validateProject(s){
   const finite=n=>typeof n==='number'&&Number.isFinite(n),positive=n=>Number.isInteger(n)&&n>0&&n<=8192;
