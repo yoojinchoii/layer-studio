@@ -219,3 +219,11 @@ test('coarse and balanced mesh envelopes retain curved painted silhouettes with 
   const basic=silhouetteTopology(l,joints,'balanced'),fine=silhouetteTopology(l,joints,'fine');assert.ok(basic.points.length<=36);assert.ok(fine.points.length>basic.points.length);
   for(const mode of ['simple','balanced','fine']){const m=silhouetteTopology(l,joints,mode),h=m.points.slice(0,m.hull);for(let y=0;y<180;y++)for(let x=0;x<60;x++)if(l.data[(y*60+x)*4+3])for(let i=0;i<h.length;i++){const a=h[i],b=h[(i+1)%h.length];assert.ok((b[0]-a[0])*(y+.5-a[1])-(b[1]-a[1])*(x+.5-a[0])>=-1e-5);}}
 });
+test('balanced mesh hugs a diagonal limb instead of ballooning into long empty triangles',async()=>{
+  const {silhouetteTopology}=await import('./mesh-topology.js'),w=120,h=260;
+  const l=layer('shin',0,0,w,h,(x,y)=>{const center=25+y*.25,radius=20-y*.025;return Math.abs(x-center)<radius;});
+  const top=silhouetteTopology(l,[{p:{x:65,y:130},dir:{x:.24,y:.97},band:14}],'balanced'),hull=top.points.slice(0,top.hull);
+  const area=Math.abs(hull.reduce((sum,p,i)=>sum+p[0]*hull[(i+1)%hull.length][1]-p[1]*hull[(i+1)%hull.length][0],0))/2;
+  const painted=l.data.filter((v,i)=>i%4===3&&v>8).length;
+  assert.ok(area/painted<1.25,`mesh envelope is ${(area/painted).toFixed(2)}x the painted limb`);
+});

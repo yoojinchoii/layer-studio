@@ -1,4 +1,4 @@
-// Alpha-aware convex envelope and sparse joint rows. Keeps all painted pixels inside the mesh;
+// Alpha-aware convex envelope and sparse joint rows. Keeps visible pixels inside the mesh;
 // concave gaps stay transparent instead of being cut through by a coarse outline approximation.
 const cross=(a,b,c)=>(b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);
 function hullOf(points){
@@ -26,26 +26,39 @@ function triangulate(points){
   // Spine's image-space winding is clockwise (image y points down).
   return tris.filter(t=>t.every(k=>k<n)).flatMap(([a,b,c])=>[a,c,b]);
 }
-// Circumscribed support polygon: reducing the boundary never cuts painted pixels off.
-function envelope(hull,w,h,count){
-  if(hull.length<=count)return hull;
-  let poly=[[0,0],[w,0],[w,h],[0,h]];
-  for(let k=0;k<count;k++){
-    const a=2*Math.PI*k/count,n=[Math.cos(a),Math.sin(a)],d=Math.max(...hull.map(p=>p[0]*n[0]+p[1]*n[1]));
-    const next=[];
-    for(let i=0;i<poly.length;i++){
-      const p=poly[i],q=poly[(i+1)%poly.length],u=p[0]*n[0]+p[1]*n[1]-d,v=q[0]*n[0]+q[1]*n[1]-d;
-      if(u<=1e-7)next.push(p);
-      if((u>1e-7)!==(v>1e-7)){const t=u/(u-v);next.push([p[0]+t*(q[0]-p[0]),p[1]+t*(q[1]-p[1])]);}
-    }poly=next;
+function clipToEdge(poly,a,b){
+  const next=[];
+  for(let i=0;i<poly.length;i++){
+    const p=poly[i],q=poly[(i+1)%poly.length],u=cross(a,b,p),v=cross(a,b,q);
+    if(u>=-1e-7)next.push(p);
+    if((u>=-1e-7)!==(v>=-1e-7)){const t=u/(u-v);next.push([p[0]+t*(q[0]-p[0]),p[1]+t*(q[1]-p[1])]);}
   }
+  return next;
+}
+// Circumscribed support polygon: use the silhouette's own longest edges and evenly spaced
+// perimeter edges. Uniform world-axis support angles make a narrow diagonal limb balloon into
+// a diamond, producing long triangles that collapse when a joint bends.
+function envelope(hull,w,h,count){
+  // A few extra real contour vertices are much safer than replacing them with a loose polygon.
+  if(hull.length<=count+4)return hull;
+  const edges=hull.map((a,i)=>{const b=hull[(i+1)%hull.length];return {i,a,b,length:Math.hypot(b[0]-a[0],b[1]-a[1])};}),chosen=new Set();
+  // Preserve the dominant sides of long, tilted limbs.
+  for(const e of [...edges].sort((a,b)=>b.length-a.length).slice(0,Math.max(4,Math.floor(count/2))))chosen.add(e.i);
+  // Add support edges around the whole perimeter so curved ends stay enclosed.
+  const perimeter=edges.reduce((n,e)=>n+e.length,0);let walked=0,index=0;
+  for(let k=0;k<count;k++){
+    const target=(k+.5)*perimeter/count;while(index<edges.length-1&&walked+edges[index].length<target)walked+=edges[index++].length;chosen.add(index);
+  }
+  for(const e of [...edges].sort((a,b)=>b.length-a.length))if(chosen.size<count)chosen.add(e.i);
+  let poly=[[0,0],[w,0],[w,h],[0,h]];
+  for(const i of [...chosen].sort((a,b)=>a-b)){poly=clipToEdge(poly,hull[i],hull[(i+1)%hull.length]);if(poly.length<3)return hull;}
   return hullOf(poly);
 }
 export function silhouetteTopology(layer,joints=[],density='balanced'){
   const {width:w,height:h,data}=layer;if(!data)return null;
   const profile={simple:{boundary:8,rows:[-1,0,1],cols:[0,1]},balanced:{boundary:12,rows:[-1,-.5,0,.5,1],cols:[0,1]},fine:{boundary:20,rows:[-1,-.5,0,.5,1],cols:[0,.5,1]}}[density]||{boundary:12,rows:[-1,0,1],cols:[0,.5,1]};
   const corners=[];
-  for(let y=0;y<h;y++){let left=w,right=-1;for(let x=0;x<w;x++)if(data[(y*w+x)*4+3]>0){left=Math.min(left,x);right=x;}
+  for(let y=0;y<h;y++){let left=w,right=-1;for(let x=0;x<w;x++)if(data[(y*w+x)*4+3]>8){left=Math.min(left,x);right=x;}
     if(right>=0)corners.push([left,y],[right+1,y],[left,y+1],[right+1,y+1]);}
   const hull=envelope(hullOf(corners),w,h,profile.boundary);if(hull.length<3)return null;
   const points=[...hull],inside=p=>hull.every((a,i)=>cross(a,hull[(i+1)%hull.length],p)>1e-5);

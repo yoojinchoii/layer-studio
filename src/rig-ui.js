@@ -8,7 +8,7 @@ import {packAtlas,encodePNG} from './spine-export.js';
 import {zipSync,strToU8} from 'fflate';
 import {writePsd} from 'ag-psd';
 export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
-  const $=id=>document.getElementById(id);let placing=false,project=null,playing=false,processing=false,raf=0,started=0,cached=null,cachedParts=null,drag=null,history=[];
+  const $=id=>document.getElementById(id);let placing=false,project=null,playing=false,processing=false,raf=0,started=0,cached=null,cachedParts=null,drag=null,history=[],future=[];
   let viewZoom=1;
   function fitPreview(){if(!project||!$('rigDialog').open)return;const c=$('rigCanvas'),box=c.parentElement,w=box.clientWidth,h=box.clientHeight;if(!w||!h)return;const scale=Math.min(w/project.rig.width,h/project.rig.height)*viewZoom;c.style.width=`${project.rig.width*scale}px`;c.style.height=`${project.rig.height*scale}px`;$('rigZoomValue').textContent=`${Math.round(viewZoom*100)}%`;}
   for(const key of ['Joints','Parts','Finish'])$('rigTab'+key).onclick=()=>{for(const k of ['Joints','Parts','Finish']){$('rigTab'+k).setAttribute('aria-selected',String(k===key));$('rigPanel'+k).hidden=k!==key;}fitPreview();draw();};
@@ -47,7 +47,11 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     const res=await call('/api/inpaint',JSON.stringify({items}),'application/json'),images={};
     for(const [k,p]of todo.entries()){const bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(res.images[k]),c=>c.charCodeAt(0))],{type:'image/png'}));const c=canvas(p.width,p.height);c.getContext('2d').drawImage(bitmap,0,0);bitmap.close();images[p.slot]=c.getContext('2d').getImageData(0,0,p.width,p.height).data;}
     project.fill={key,images};dirty();draw();status();message('가려진 부분과 관절 이음새를 AI로 다시 그렸어요.');}
-  const remember=()=>{history.push(JSON.stringify(project.rig));if(history.length>40)history.shift();$('rigUndo').disabled=false;};
+  const pushHistory=(stack,value)=>{stack.push(value);if(stack.length>40)stack.shift();};
+  const remember=()=>{if(!project)return;const value=JSON.stringify(project.rig);if(history.at(-1)!==value)pushHistory(history,value);future=[];$('rigUndo').disabled=false;};
+  function restoreHistory(from,to,label){if(!project||!from.length)return false;stop();pushHistory(to,JSON.stringify(project.rig));project.rig=JSON.parse(from.pop());sleeveHistory=weightHistory=angleHistory=false;dirty();menus();message(label);return true;}
+  const undo=()=>restoreHistory(history,future,'한 단계 되돌렸어요.');
+  const redo=()=>restoreHistory(future,history,'되돌린 작업을 다시 적용했어요.');
   const poseMode=()=>$('rigMode').value==='pose';
   const selected=()=>$('rigBone').value;
   const status=()=>{const n=parts().length,meshes=Object.values(skeleton().skins[0].attachments).map(a=>Object.values(a)[0]).filter(a=>a.type==='mesh'),vertices=meshes.reduce((n,a)=>n+a.uvs.length/2,0);message(`Spine 파츠 ${n}개 · 메쉬 ${meshes.length}개 / 정점 ${vertices}개 · 관절 ${Object.keys(project.rig.points).length}개. ${meshes.length?'가중치 포함: Spine에서 다시 붙일 필요 없어요.':'파츠 회전 방식입니다. 메쉬·가중치 적용으로 전환하세요.'}`);};
@@ -66,7 +70,7 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
       const same=currentProject();
       if(!same){const source=state.layers.map(l=>({...l})),meta=source.map(metadata),rig=inferRig(meta,state.width,state.height);
         refineRig(rig,source.map((l,i)=>({...meta[i],data:pixels(l.canvas)})));initSleeves(source.map((l,i)=>({...meta[i],data:pixels(l.canvas)})),rig);
-        project={ids:state.layers.map(l=>l.id).join('|'),source,layers:source,rig,meta,removed:0};history=[];$('rigStrength').value='1';$('rigAmplitude').value='1';}
+        project={ids:state.layers.map(l=>l.id).join('|'),source,layers:source,rig,meta,removed:0};history=[];future=[];$('rigStrength').value='1';$('rigAmplitude').value='1';}
       else{project.meta=state.layers.map(metadata);const ids=project.source.map(l=>l.id);project.source=state.layers.map(l=>({...l,canvas:project.source[ids.indexOf(l.id)]?.canvas||l.canvas}));project.layers=project.layers.map((l,i)=>({...l,...project.meta[i]}));}
       dirty();$('rigMode').value='setup';menus();if(options.show!==false&&!$('rigDialog').open)$('rigDialog').showModal();if(!same){message('경계를 정리하고 있어요…');await new Promise(r=>setTimeout(r,30));await cleanup();try{if(options.detect!==false)await detectJoints();}catch(e){message(`AI 관절 인식 실패 · 모양 기반 추정 사용 (${e.message})`);}}draw();return true;
     }catch(e){message(e.message);toast(e.message);return false;}
@@ -187,7 +191,13 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   $('rigAdd').onclick=()=>{if(!project)return;if($('rigMode').value!=='setup'){$('rigMode').value='setup';fields();}stop();placing=!placing;$('rigAdd').classList.toggle('primary',placing);const name=k=>project.rig.labels[k]||k,sel=selected();if(placing&&$('rigInsertMode').value==='between'&&sel==='root'){placing=false;$('rigAdd').classList.remove('primary');message('전체 기준 위에는 넣을 수 없어요.');return;}
     message(placing?($('rigInsertMode').value==='between'?`미리보기에서 위치를 클릭하세요. ${name(project.rig.parents[sel])} → [새 관절] → ${name(sel)} 순서로 들어갑니다. (다시 누르면 취소)`:`미리보기에서 새 관절 위치를 클릭하세요. ${name(sel)} 아래에 붙습니다. (다시 누르면 취소)`):'관절 추가를 취소했어요.');};
   $('rigDelete').onclick=()=>{try{remember();deleteJoint(project.rig,selected());dirty();menus('body');}catch(e){message(e.message);}};
-  $('rigUndo').onclick=()=>{if(!history.length)return;project.rig=JSON.parse(history.pop());dirty();menus();};
+  $('rigUndo').onclick=undo;
+  document.addEventListener('keydown',e=>{
+    if(!project||!$('rigDialog').open||processing||e.defaultPrevented||e.altKey||!(e.metaKey||e.ctrlKey)||e.key.toLowerCase()!=='z')return;
+    const target=e.target,type=target?.type;
+    if(target?.isContentEditable||target?.tagName==='TEXTAREA'||target?.tagName==='INPUT'&&['text','number','search','url','email','tel','password'].includes(type))return;
+    e.preventDefault();(e.shiftKey?redo:undo)();
+  });
   $('rigReinfer').onclick=()=>{if(!project)return;remember();const fresh=inferRig(project.meta,project.rig.width,project.rig.height);refineRig(fresh,project.layers.map((l,i)=>({...project.meta[i],data:pixels(l.canvas)})));for(const id of Object.keys(fresh.points))if(boneLabels[id])project.rig.points[id]=fresh.points[id];dirty();fields();status();message('관절 위치를 파츠 모양에서 다시 추정했어요. 추가 관절과 연결 설정은 유지됩니다.');};
   $('rigMode').onchange=()=>{stop();fields();message(poseMode()?'관절을 선택하고 각도를 조절하세요. 저장하면 manual_pose 동작에 포함됩니다.':'관절 점을 드래그하거나 X·Y를 입력하세요. 방향키 1px / Shift+방향키 10px.');};
   let angleHistory=false;$('rigAngle').oninput=()=>{stop();if(!angleHistory){remember();angleHistory=true;}project.rig.pose[selected()]=Number($('rigAngle').value);$('rigPoseReset').disabled=!project.rig.pose[selected()];$('rigAngleValue').textContent=`${$('rigAngle').value}°`;$('rigAngleInput').value=$('rigAngle').value;dirty();draw();};$('rigAngle').onchange=()=>angleHistory=false;
@@ -256,7 +266,7 @@ manual_pose: 웹에서 맞춘 포즈.
     state.reference=reference;state.layers=layers;state.width=original.width;state.height=original.height;state.original=reference||original;state.name=saved.name||'관절 프로젝트';state.kind='관절 프로젝트';state.view='composite';state.selected=layers[0].id;
     project={syncId:saved.syncId||crypto.randomUUID(),ids:layers.map(l=>l.id).join('|'),source:layers,layers,meta:layers.map(metadata),rig:upgradeRig({limbStyle:'mesh',ik:true,...saved.rig}),removed:0};const split=splitLegLayers(layers.map((l,i)=>({...project.meta[i],...l,data:pixels(l.canvas)})),project.rig);
     if(split.changed){const separated=split.layers.map(l=>{if(l.canvas)return layers[l.sourceIndex];const c=canvas(l.width,l.height);c.getContext('2d').putImageData(new ImageData(l.data,l.width,l.height),0,0);return {...l,canvas:c};});project.layers=project.source=state.layers=separated;project.meta=separated.map(metadata);project.ids=separated.map(l=>l.id).join('|');state.selected=separated[0].id;}
-    initSleeves(project.layers.map((l,i)=>({...project.meta[i],data:pixels(l.canvas)})),project.rig);history=[];dirty();render();$('rigStrength').value=String(saved.strength??1);$('rigAmplitude').value=String(saved.amplitude??1);$('rigMode').value='setup';$('rigSeams').checked=saved.seams!==false;menus('body');if(!$('rigDialog').open)$('rigDialog').showModal();if(!saved.pixelsProcessed)await cleanup();if(saved.fill?.images){const images={};for(const [slot,url]of Object.entries(saved.fill.images)){const part=parts().find(p=>p.slot===slot);if(!part?.fill||typeof url!=='string'||!url.startsWith('data:image/png;base64,'))continue;const bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(url.slice(22)),c=>c.charCodeAt(0))],{type:'image/png'}));if(bitmap.width!==part.width||bitmap.height!==part.height){bitmap.close();throw Error('저장된 이음새 이미지 크기가 맞지 않아요.');}const c=canvas(part.width,part.height);c.getContext('2d').drawImage(bitmap,0,0);bitmap.close();images[slot]=pixels(c);}project.fill={key:fillKey(),images};dirty();draw();}message('저장한 보정 파츠·관절·포즈를 불러왔어요.');
+    initSleeves(project.layers.map((l,i)=>({...project.meta[i],data:pixels(l.canvas)})),project.rig);history=[];future=[];dirty();render();$('rigStrength').value=String(saved.strength??1);$('rigAmplitude').value=String(saved.amplitude??1);$('rigMode').value='setup';$('rigSeams').checked=saved.seams!==false;menus('body');if(!$('rigDialog').open)$('rigDialog').showModal();if(!saved.pixelsProcessed)await cleanup();if(saved.fill?.images){const images={};for(const [slot,url]of Object.entries(saved.fill.images)){const part=parts().find(p=>p.slot===slot);if(!part?.fill||typeof url!=='string'||!url.startsWith('data:image/png;base64,'))continue;const bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(url.slice(22)),c=>c.charCodeAt(0))],{type:'image/png'}));if(bitmap.width!==part.width||bitmap.height!==part.height){bitmap.close();throw Error('저장된 이음새 이미지 크기가 맞지 않아요.');}const c=canvas(part.width,part.height);c.getContext('2d').drawImage(bitmap,0,0);bitmap.close();images[slot]=pixels(c);}project.fill={key:fillKey(),images};dirty();draw();}message('저장한 보정 파츠·관절·포즈를 불러왔어요.');
   }
   $('rigProjectInput').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>60*1024*1024)throw Error('편집 프로젝트는 60MB 이하로 열어주세요.');state.recoveryId=crypto.randomUUID();await restoreProject(JSON.parse(await file.text()));}catch(err){toast(err.message);}finally{e.target.value='';}};
   $('rigPsdSave').onclick=()=>{if(!currentProject()||processing)return;try{const bytes=writePsd(psdDocument(parts(),project.rig.width,project.rig.height),{generateThumbnail:false});download(new Blob([bytes],{type:'image/vnd.adobe.photoshop'}),filename()+'-parts.psd');message('보정된 소매·맨팔까지 그룹 PSD로 저장했어요.');}catch(e){message(`PSD 저장 실패: ${e.message}`);}};
