@@ -75,5 +75,6 @@ export function separateSleeve(layer,rig,index){
     const gx=layer.x+x+.5,gy=layer.y+y+.5,t=dot(gx-shoulder.x,gy-shoulder.y,axis),u=dot(gx-shoulder.x,gy-shoulder.y,across)-centre*clamp(t/cuffT,0,1),r=radius*(.85+.15*clamp(t/cuffT,0,1));
     const cap=Math.hypot(u,Math.min(0,t));if(cap<=r)arm.set([...config.skin,255],k);
   }
-  return [crop(layer,sleeve,{name:`sleeve_${side==='left'?'R':'L'}`,bone:'chest',mode:'rigid',role:'sleeve'}),crop(layer,arm,{name:`${layer.name}_skin`,bone:rig.assignments[index],mode:rig.modes[index],role:'skin'})];
+  // The sleeve follows the upper arm; only its shoulder seam blends into the torso (see sleeve_* meshes).
+  return [crop(layer,sleeve,{name:`sleeve_${side==='left'?'R':'L'}`,bone:`arm_${side}`,mode:`sleeve_${side}`,role:'sleeve'}),crop(layer,arm,{name:`${layer.name}_skin`,bone:rig.assignments[index],mode:rig.modes[index],role:'skin'})];
 }

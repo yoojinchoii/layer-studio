@@ -69,8 +69,8 @@ export function inferRig(layers,width,height){
   const assignments=layers.map(l=>{const n=l.name.toLowerCase(),part=n.match(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_([rl])(?:_\d+)?$/);
     if(part)return `${partBones[part[1]]}_${part[2]==='r'?'left':'right'}`;
     const lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'hip':'ankle'}_${lower[2]==='r'?'left':'right'}`;
-    if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/topwear|상의|^sleeve_[rl]$/.test(n))return 'chest';if(/handwear|^arm|팔/.test(n))return center(l)<cx?'arm_left':'arm_right';if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
-  const modes=layers.map((l,i)=>{const n=l.name.toLowerCase(),lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'leg':'foot'}_${lower[2]==='r'?'left':'right'}`;if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
+    if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'arm_left':'arm_right';if(/topwear|상의/.test(n))return 'chest';if(/handwear|^arm|팔/.test(n))return center(l)<cx?'arm_left':'arm_right';if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
+  const modes=layers.map((l,i)=>{const n=l.name.toLowerCase(),lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'leg':'foot'}_${lower[2]==='r'?'left':'right'}`;if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'sleeve_left':'sleeve_right';if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
   return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,limbStyle:'mesh',weightBlend:{},partBones:{},meshDensity:'balanced',ik:true};
 }
 // Pixel statistics for opaque pixels of a layer, in image coordinates (pixel centres).
@@ -245,7 +245,7 @@ export function buildParts(layers,rig){
   layers.forEach((original,i)=>{
     const separated=separateSleeve(original,rig,i);
     for(const l of separated||[original]){
-      const mode=l.role==='sleeve'?'rigid':rig.modes[i],bone=l.role==='sleeve'?'chest':rig.assignments[i];
+      const mode=l.role==='sleeve'?l.mode:rig.modes[i],bone=l.role==='sleeve'?l.bone:rig.assignments[i];
       const split=cutout&&mode!=='rigid'?splitLimb(l,rig,mode):null;
       const sides=!cutout&&(mode==='legs'||mode==='feet')&&l.data?splitMeshSides(l,rig,mode):null;
       if(sides?.length)parts.push(...sides.map(p=>({...p,source:i})));
@@ -279,6 +279,8 @@ function splitMeshSides(layer,rig,mode){
 }
 function meshChain(rig,mode,x,y){
   let side=mode.endsWith('_left')?'left':'right';
+  // Sleeve: torso side of the shoulder → upper arm.
+  if(mode.startsWith('sleeve_'))return [rig.parents[`arm_${side}`]||'chest',`arm_${side}`];
   if(mode==='legs'||mode==='feet')side=chainInfo(['hip_left','knee_left','ankle_left'].map(id=>rig.points[id]),x,y).distance<=chainInfo(['hip_right','knee_right','ankle_right'].map(id=>rig.points[id]),x,y).distance?'left':'right';
   if(mode==='feet'||mode.startsWith('foot_'))return [`ankle_${side}`];
   const ids=(mode==='legs'||mode.startsWith('leg_')?['hip','knee','ankle']:['arm','elbow','wrist']).map(j=>`${j}_${side}`),out=[ids[0]];
@@ -300,7 +302,9 @@ function weightGuide(layer,rig,mode,bone,x,y){
   for(let i=1;i<names.length;i++){
     const prev=points[i-1],p=points[i],next=points[i+1];
     const incoming=unit(p.x-prev.x,p.y-prev.y)||{x:0,y:1},outgoing=next&&unit(next.x-p.x,next.y-p.y);
-    const dir=outgoing?(unit(incoming.x+outgoing.x,incoming.y+outgoing.y)||incoming):incoming;
+    let dir=outgoing?(unit(incoming.x+outgoing.x,incoming.y+outgoing.y)||incoming):incoming;
+    // A sleeve blends across the shoulder along the arm, not along the chest→shoulder line.
+    if(mode.startsWith('sleeve_')){const e=rig.points[`elbow_${mode.slice(7)}`];dir=e&&unit(e.x-p.x,e.y-p.y)||dir;}
     const len=Math.hypot(p.x-prev.x,p.y-prev.y),after=next?Math.hypot(next.x-p.x,next.y-p.y):len;
     const maxBand=Math.max(1,Math.min(len,after)*.3);
     const thickness=layer.data?halfWidth(layer,p,dir):null;

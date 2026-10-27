@@ -10,12 +10,17 @@ function fixture(alpha=255){
 }
 function rgba(part,x,y){if(x<part.x||y<part.y||x>=part.x+part.width||y>=part.y+part.height)return [0,0,0,0];return Array.from(part.data.slice(((y-part.y)*part.width+x-part.x)*4,((y-part.y)*part.width+x-part.x)*4+4));}
 function over(a,b){const aa=a[3]/255,ba=b[3]/255,alpha=aa+ba*(1-aa);return [...a.slice(0,3).map((v,i)=>alpha?(v*aa+b[i]*ba*(1-aa))/alpha:0),alpha*255];}
-test('short sleeve becomes a fixed sprite and skin receives only its own arm weights',()=>{
+test('short sleeve follows the upper arm, blends into the torso at the shoulder, and skin keeps its own arm weights',()=>{
   const {layers,rig}=fixture();assert.equal(initSleeves(layers,rig),1);const original=layers[1].data.slice(),parts=buildParts(layers,rig),sleeve=parts.find(p=>p.role==='sleeve'),arm=parts.find(p=>p.role==='skin');
-  assert.equal(parts.length,3);assert.equal(sleeve.bone,'chest');assert.equal(sleeve.mode,'rigid');assert.equal(arm.mode,'arm_left');assert.deepEqual(layers[1].data,original);
+  assert.equal(parts.length,3);assert.equal(sleeve.bone,'arm_left');assert.equal(sleeve.mode,'sleeve_left');assert.equal(arm.mode,'arm_left');assert.deepEqual(layers[1].data,original);
   const sk=makeSkeleton(parts,rig),rest=poseMatrices(sk),posed=poseMatrices(sk,null,{upper_arm_R:65,forearm_R:30});assert.deepEqual(rest.torso,posed.torso);
   const mesh=sk.skins[0].attachments[arm.slot][arm.slot];let at=0;while(at<mesh.vertices.length){const n=mesh.vertices[at++];for(let j=0;j<n;j++){assert.ok(['upper_arm_R','forearm_R','hand_R'].includes(sk.bones[mesh.vertices[at]].name));at+=4;}}
-  assert.notDeepEqual(meshWorldVertices(mesh,sk,rest),meshWorldVertices(mesh,sk,posed));assert.equal(sk.skins[0].attachments[sleeve.slot][sleeve.slot].type,undefined);
+  assert.notDeepEqual(meshWorldVertices(mesh,sk,rest),meshWorldVertices(mesh,sk,posed));
+  // Sleeve mesh: only torso + upper arm; the cuff end moves with the arm, the shoulder seam stays near the torso.
+  const sm=sk.skins[0].attachments[sleeve.slot][sleeve.slot];assert.equal(sm.type,'mesh');const used=new Set();let k=0;while(k<sm.vertices.length){const n=sm.vertices[k++];for(let j=0;j<n;j++){used.add(sk.bones[sm.vertices[k]].name);k+=4;}}
+  assert.ok([...used].every(b=>['torso','upper_arm_R'].includes(b)),[...used].join());assert.ok(used.has('upper_arm_R'));
+  const a=meshWorldVertices(sm,sk,rest),b=meshWorldVertices(sm,sk,posed),moved=a.map((p,i)=>Math.hypot(p[0]-b[i][0],p[1]-b[i][1])),cuff=a.reduce((m,p,i)=>p[1]<a[m][1]?i:m,0),top=a.reduce((m,p,i)=>p[1]>a[m][1]?i:m,0);
+  assert.ok(moved[cuff]>15,'cuff follows the arm');assert.ok(moved[top]<moved[cuff]*.5,'shoulder seam stays close to the torso');
   assert.ok(rgba(arm,62,65)[3]>0,'estimated skin extends up inside sleeve');
   for(let y=50;y<250;y++)for(let x=50;x<74;x++)assert.deepEqual(over(rgba(sleeve,x,y),rgba(arm,x,y)),rgba(layers[1],x,y),'opaque artwork at rest preserved');
 });
@@ -38,6 +43,6 @@ test('splitting legs remaps existing sleeve settings by source index',()=>{
   layers.unshift(legs);rig.modes.unshift('legs');rig.assignments.unshift('pelvis');rig.sleeves={2:config};const split=splitLegLayers(layers,rig);assert.equal(split.changed,true);const armIndex=split.layers.findIndex(l=>l.name==='handwear-r');assert.deepEqual(rig.sleeves[armIndex],config);
 });
 
-test('exported sleeve sprite keeps its chest binding when reimported',()=>{
- const {layers,rig}=fixture();initSleeves(layers,rig);const parts=buildParts(layers,rig),imported=inferRig(parts,300,300),i=parts.findIndex(p=>p.role==='sleeve');assert.equal(imported.assignments[i],'chest');assert.equal(imported.modes[i],'rigid');
+test('exported sleeve sprite keeps its arm binding when reimported',()=>{
+ const {layers,rig}=fixture();initSleeves(layers,rig);const parts=buildParts(layers,rig),imported=inferRig(parts,300,300),i=parts.findIndex(p=>p.role==='sleeve');assert.equal(imported.assignments[i],'arm_left');assert.equal(imported.modes[i],'sleeve_left');
 });
