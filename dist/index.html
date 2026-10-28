@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=ui3">
+<link rel="stylesheet" href="/style.css?v=ui4">
 </head>
 <body>
 <header class="topbar">
@@ -300,6 +300,7 @@
               <option value="rigid">한 관절에 고정</option>
               <option value="arm_left">화면 왼쪽 팔 · 상완/전완/손</option>
               <option value="arm_right">화면 오른쪽 팔 · 상완/전완/손</option>
+              <option value="bottoms">하의·치마 · 허리 + 양다리 따라 움직임</option>
               <option value="legs">양다리 · 허벅지/정강이/발</option>
               <option value="feet">신발 · 좌우로 분리</option>
               <option value="leg_left">오른 다리 · 화면 왼쪽</option>
@@ -311,7 +312,7 @@
           </div>
           <div id="rigSleeveTools" class="card" hidden>
             <h3>소매와 맨팔 분리</h3>
-            <label class="switch-row"><span>소매를 몸통에 고정</span><input id="rigSleeveEnabled" type="checkbox"></label>
+            <label class="switch-row"><span>소매 분리 (팔 따라 움직임)</span><input id="rigSleeveEnabled" type="checkbox"></label>
             <p id="rigSleeveNote" class="field-note"></p>
             <button id="rigSleeveAuto" class="button outlined full">소매·팔 자동 분리 · AI 사용 없음</button>
             <div class="field-heading"><label class="field-label" for="rigSleeveOffset">소매 끝 위치</label><output id="rigSleeveOffsetValue">0px</output></div>
@@ -412,6 +413,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=ui3"></script>
+<script type="module" src="/app.js?v=ui4"></script>
 </body>
 </html>

@@ -46,3 +46,16 @@ test('splitting legs remaps existing sleeve settings by source index',()=>{
 test('exported sleeve sprite keeps its arm binding when reimported',()=>{
  const {layers,rig}=fixture();initSleeves(layers,rig);const parts=buildParts(layers,rig),imported=inferRig(parts,300,300),i=parts.findIndex(p=>p.role==='sleeve');assert.equal(imported.assignments[i],'arm_left');assert.equal(imported.modes[i],'sleeve_left');
 });
+test('shorts follow the thighs: waistband stays on the lower body, each trouser leg moves with its own thigh',()=>{
+  const block=(name,x,y,w,h,c)=>{const data=new Uint8ClampedArray(w*h*4);for(let i=0;i<w*h;i++)data.set([...c,255],i*4);return {name,x,y,width:w,height:h,data,visible:true,opacity:1};};
+  const layers=[block('topwear',100,40,100,90,[30,100,160]),block('legwear',105,150,90,140,[210,145,100]),block('bottomwear',100,125,100,70,[30,30,80])];
+  const rig=inferRig(layers,300,300);Object.assign(rig.points,{body:{x:150,y:125},upper:{x:150,y:121},pelvis:{x:150,y:129},hip_left:{x:128,y:140},knee_left:{x:128,y:210},ankle_left:{x:128,y:280},hip_right:{x:172,y:140},knee_right:{x:172,y:210},ankle_right:{x:172,y:280}});
+  assert.equal(rig.modes[2],'bottoms');assert.equal(rig.assignments[2],'pelvis');
+  const parts=buildParts(layers,rig),shorts=parts.find(p=>p.source===2),sk=makeSkeleton(parts,rig),m=sk.skins[0].attachments[shorts.slot][shorts.slot];assert.equal(m.type,'mesh');
+  const used=new Set();let k=0;while(k<m.vertices.length){const n=m.vertices[k++];assert.ok(n<=2);for(let j=0;j<n;j++){used.add(sk.bones[m.vertices[k]].name);k+=4;}}
+  assert.ok(used.has('lower_body')&&used.has('thigh_R')&&used.has('thigh_L'),[...used].join());
+  const rest=meshWorldVertices(m,sk,poseMatrices(sk)),lifted=meshWorldVertices(m,sk,poseMatrices(sk,null,{thigh_L:80})),moved=rest.map((p,i)=>Math.hypot(p[0]-lifted[i][0],p[1]-lifted[i][1]));
+  const root=rig.points.root,at=(x,y)=>rest.reduce((b,p,i)=>Math.hypot(p[0]-(x-root.x),p[1]-(root.y-y))<Math.hypot(rest[b][0]-(x-root.x),rest[b][1]-(root.y-y))?i:b,0);
+  assert.ok(moved[at(195,195)]>30,'lifted trouser hem follows the thigh');assert.ok(moved[at(105,195)]<1,'other trouser leg stays');assert.ok(moved[at(150,125)]<1,'waistband stays');
+  rig.limbStyle='cutout';assert.equal(buildParts(layers,rig).find(p=>p.source===2).mode,'bottoms','cutout style keeps garments as meshes');
+});

@@ -54,7 +54,7 @@ function envelope(hull,w,h,count){
   for(const i of [...chosen].sort((a,b)=>a-b)){poly=clipToEdge(poly,hull[i],hull[(i+1)%hull.length]);if(poly.length<3)return hull;}
   return hullOf(poly);
 }
-export function silhouetteTopology(layer,joints=[],density='balanced'){
+export function silhouetteTopology(layer,joints=[],density='balanced',extra=[]){
   const {width:w,height:h,data}=layer;if(!data)return null;
   const profile={simple:{boundary:8,rows:[-1,0,1],cols:[0,1]},balanced:{boundary:12,rows:[-1,-.5,0,.5,1],cols:[0,1]},fine:{boundary:20,rows:[-1,-.5,0,.5,1],cols:[0,.5,1]}}[density]||{boundary:12,rows:[-1,0,1],cols:[0,.5,1]};
   const corners=[];
@@ -71,6 +71,7 @@ export function silhouetteTopology(layer,joints=[],density='balanced'){
       if(hi>=lo)for(const f of profile.cols){const t=lo+(hi-lo)*f;add(cx+perp.x*t,cy+perp.y*t);}
     }
   }
+  for(const [x,y] of extra)add(x,y);
   // Flat areas need no uniform grid. Only bending rows and a sparse enclosing boundary remain.
   const triangles=triangulate(points);if(!triangles.length)return null;
   return {points,triangles,hull:hull.length};
