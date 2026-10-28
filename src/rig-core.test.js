@@ -113,9 +113,9 @@ test('refined weights fix the wrist tip, align vertices to the elbow, and expose
   const {vertexWeights}=await import('./rig-core.js');
   const rig=armRig(),arm=layer('handwear-r',90,90,20,250,()=>true);rig.modes=['arm_left'];rig.assignments=['arm_left'];
   const build=()=>{const p=buildParts([arm],rig),sk=makeSkeleton(p,rig);return {sk,a:sk.skins[0].attachments[p[0].slot][p[0].slot]};};
-  let {sk,a}=build();const hand=vertexWeights(a,sk,'hand_R'),fore=vertexWeights(a,sk,'forearm_R'),upper=vertexWeights(a,sk,'upper_arm_R');
+  let {sk,a}=build();const hand=vertexWeights(a,sk,'hand_R'),fore=vertexWeights(a,sk,'forearm_R'),upper=vertexWeights(a,sk,'upper_arm_R'),torso=vertexWeights(a,sk,sk.bones.find(b=>b.name==='torso')?'torso':'upper_arm_R').map((w,i)=>sk.bones.some(b=>b.name==='torso')?w:0);
   let elbow=0,tip=0;for(let i=0;i<hand.length;i++){const y=arm.y+a.uvs[i*2+1]*arm.height;
-    assert.ok(near(hand[i]+fore[i]+upper[i],1,1e-9));
+    assert.ok(near(hand[i]+fore[i]+upper[i]+torso[i],1,1e-9));
     if(near(y,200)){assert.ok(near(fore[i],.5,1e-8));elbow++;}
     if(y>310){assert.equal(hand[i],1);tip++;}
   }assert.ok(elbow>0&&tip>0);
@@ -134,7 +134,7 @@ test('separate leg meshes preserve pixels and never bind to the opposite leg',()
   const pixelCount=p=>p.data.filter((v,i)=>i%4===3&&v>0).length;
   assert.equal(parts.reduce((n,p)=>n+pixelCount(p),0),pixelCount(source));
   for(const p of parts){const a=sk.skins[0].attachments[p.slot][p.slot],right=p.mode==='leg_right';let k=0;
-    for(let i=0;i<a.uvs.length/2;i++){const count=a.vertices[k++];let sum=0;for(let j=0;j<count;j++){const bone=sk.bones[a.vertices[k]].name;assert.ok(bone.endsWith(right?'_L':'_R'));sum+=a.vertices[k+3];k+=4;}assert.ok(near(sum,1,1e-9));}
+    for(let i=0;i<a.uvs.length/2;i++){const count=a.vertices[k++];let sum=0;for(let j=0;j<count;j++){const bone=sk.bones[a.vertices[k]].name;assert.ok(bone==='lower_body'||bone.endsWith(right?'_L':'_R'));sum+=a.vertices[k+3];k+=4;}assert.ok(near(sum,1,1e-9));}
     const rest=meshWorldVertices(a,sk,poseMatrices(sk)),bent=meshWorldVertices(a,sk,poseMatrices(sk,null,{shin_R:60}));
     if(right)assert.deepEqual(rest,bent);else assert.ok(rest.some((v,i)=>Math.hypot(v[0]-bent[i][0],v[1]-bent[i][1])>10));
   }

@@ -14,7 +14,7 @@ test('short sleeve follows the upper arm, blends into the torso at the shoulder,
   const {layers,rig}=fixture();assert.equal(initSleeves(layers,rig),1);const original=layers[1].data.slice(),parts=buildParts(layers,rig),sleeve=parts.find(p=>p.role==='sleeve'),arm=parts.find(p=>p.role==='skin');
   assert.equal(parts.length,3);assert.equal(sleeve.bone,'arm_left');assert.equal(sleeve.mode,'sleeve_left');assert.equal(arm.mode,'arm_left');assert.deepEqual(layers[1].data,original);
   const sk=makeSkeleton(parts,rig),rest=poseMatrices(sk),posed=poseMatrices(sk,null,{upper_arm_R:65,forearm_R:30});assert.deepEqual(rest.torso,posed.torso);
-  const mesh=sk.skins[0].attachments[arm.slot][arm.slot];let at=0;while(at<mesh.vertices.length){const n=mesh.vertices[at++];for(let j=0;j<n;j++){assert.ok(['upper_arm_R','forearm_R','hand_R'].includes(sk.bones[mesh.vertices[at]].name));at+=4;}}
+  const mesh=sk.skins[0].attachments[arm.slot][arm.slot];let at=0;while(at<mesh.vertices.length){const n=mesh.vertices[at++];for(let j=0;j<n;j++){assert.ok(['torso','upper_arm_R','forearm_R','hand_R'].includes(sk.bones[mesh.vertices[at]].name));at+=4;}}
   assert.notDeepEqual(meshWorldVertices(mesh,sk,rest),meshWorldVertices(mesh,sk,posed));
   // Sleeve mesh: only torso + upper arm; the cuff end moves with the arm, the shoulder seam stays near the torso.
   const sm=sk.skins[0].attachments[sleeve.slot][sleeve.slot];assert.equal(sm.type,'mesh');const used=new Set();let k=0;while(k<sm.vertices.length){const n=sm.vertices[k++];for(let j=0;j<n;j++){used.add(sk.bones[sm.vertices[k]].name);k+=4;}}
@@ -58,4 +58,19 @@ test('shorts follow the thighs: waistband stays on the lower body, each trouser 
   const root=rig.points.root,at=(x,y)=>rest.reduce((b,p,i)=>Math.hypot(p[0]-(x-root.x),p[1]-(root.y-y))<Math.hypot(rest[b][0]-(x-root.x),rest[b][1]-(root.y-y))?i:b,0);
   assert.ok(moved[at(195,195)]>30,'lifted trouser hem follows the thigh');assert.ok(moved[at(105,195)]<1,'other trouser leg stays');assert.ok(moved[at(150,125)]<1,'waistband stays');
   rig.limbStyle='cutout';assert.equal(buildParts(layers,rig).find(p=>p.source===2).mode,'bottoms','cutout style keeps garments as meshes');
+});
+test('shirt bends along the spine: hem stays with the shorts, chest and painted sleeves follow their bones',()=>{
+  const block=(name,x,y,w,h,c)=>{const data=new Uint8ClampedArray(w*h*4);for(let i=0;i<w*h;i++)data.set([...c,255],i*4);return {name,x,y,width:w,height:h,data,visible:true,opacity:1};};
+  const layers=[block('neck',140,40,20,30,[210,145,100]),block('topwear',80,60,140,90,[30,100,160]),block('bottomwear',100,140,100,50,[30,30,80])];
+  const rig=inferRig(layers,300,300);Object.assign(rig.points,{neck:{x:150,y:62},head:{x:150,y:40},chest:{x:150,y:85},body:{x:150,y:140},upper:{x:150,y:136},pelvis:{x:150,y:144},arm_left:{x:100,y:68},elbow_left:{x:80,y:128},arm_right:{x:200,y:68},elbow_right:{x:220,y:128}});
+  assert.deepEqual(rig.modes.slice(0,2),['neck','torso']);
+  const parts=buildParts(layers,rig),sk=makeSkeleton(parts,rig),root=rig.points.root,mesh=slot=>sk.skins[0].attachments[slot][slot];
+  const shirt=mesh(parts.find(p=>p.source===1).slot),rest=meshWorldVertices(shirt,sk,poseMatrices(sk)),bent=meshWorldVertices(shirt,sk,poseMatrices(sk,null,{upper_body:-20}));
+  const at=(x,y)=>rest.reduce((b,p,i)=>Math.hypot(p[0]-(x-root.x),p[1]-(root.y-y))<Math.hypot(rest[b][0]-(x-root.x),rest[b][1]-(root.y-y))?i:b,0),moved=i=>Math.hypot(rest[i][0]-bent[i][0],rest[i][1]-bent[i][1]);
+  assert.ok(moved(at(220,150))<2,'hem stays with the lower body');assert.ok(moved(at(183,60))>20,'shoulders follow the upper body');
+  const mid=moved(at(220,140));assert.ok(mid>.5&&mid<moved(at(183,60)),'waist blends between them');
+  const lifted=meshWorldVertices(shirt,sk,poseMatrices(sk,null,{upper_arm_R:60}));assert.ok(Math.hypot(...[0,1].map(k=>rest[at(81,85)][k]-lifted[at(81,85)][k]))>5,'painted sleeve follows the arm');
+  assert.ok(Math.hypot(...[0,1].map(k=>rest[at(117,60)][k]-lifted[at(117,60)][k]))<.5,'collar ignores the arm');
+  const neck=mesh(parts.find(p=>p.source===0).slot),nr=meshWorldVertices(neck,sk,poseMatrices(sk)),nh=meshWorldVertices(neck,sk,poseMatrices(sk,null,{head:25})),nm=nr.map((p,i)=>Math.hypot(p[0]-nh[i][0],p[1]-nh[i][1]));
+  assert.ok(Math.max(...nm)>1&&Math.min(...nm)<.5,'neck top follows the head, its base stays on the chest');
 });

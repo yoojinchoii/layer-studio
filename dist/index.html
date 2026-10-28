@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=ui4">
+<link rel="stylesheet" href="/style.css?v=ui5">
 </head>
 <body>
 <header class="topbar">
@@ -300,6 +300,8 @@
               <option value="rigid">한 관절에 고정</option>
               <option value="arm_left">화면 왼쪽 팔 · 상완/전완/손</option>
               <option value="arm_right">화면 오른쪽 팔 · 상완/전완/손</option>
+              <option value="torso">상의 · 허리 + 가슴 + 소매 따라 휘어짐</option>
+              <option value="neck">목 · 가슴 + 머리 사이 연결</option>
               <option value="bottoms">하의·치마 · 허리 + 양다리 따라 움직임</option>
               <option value="legs">양다리 · 허벅지/정강이/발</option>
               <option value="feet">신발 · 좌우로 분리</option>
@@ -413,6 +415,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=ui4"></script>
+<script type="module" src="/app.js?v=ui5"></script>
 </body>
 </html>

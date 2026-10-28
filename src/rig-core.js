@@ -70,8 +70,8 @@ export function inferRig(layers,width,height){
     if(part)return `${partBones[part[1]]}_${part[2]==='r'?'left':'right'}`;
     const lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'hip':'ankle'}_${lower[2]==='r'?'left':'right'}`;
     if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'arm_left':'arm_right';if(/topwear|상의/.test(n))return 'chest';if(/handwear|^arm|팔/.test(n))return center(l)<cx?'arm_left':'arm_right';if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
-  const modes=layers.map((l,i)=>{const n=l.name.toLowerCase(),lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'leg':'foot'}_${lower[2]==='r'?'left':'right'}`;if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'sleeve_left':'sleeve_right';if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';if(/bottomwear|하의|skirt|치마/.test(n))return 'bottoms';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
-  return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,garments:1,limbStyle:'mesh',weightBlend:{},partBones:{},meshDensity:'balanced',ik:true};
+  const modes=layers.map((l,i)=>{const n=l.name.toLowerCase(),lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'leg':'foot'}_${lower[2]==='r'?'left':'right'}`;if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'sleeve_left':'sleeve_right';if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';if(/bottomwear|하의|skirt|치마/.test(n))return 'bottoms';if(/topwear|상의/.test(n)&&assignments[i]==='chest')return 'torso';if(/^(neck|목)$/.test(n))return 'neck';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
+  return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,garments:2,limbStyle:'mesh',weightBlend:{},partBones:{},meshDensity:'balanced',ik:true};
 }
 // Pixel statistics for opaque pixels of a layer, in image coordinates (pixel centres).
 function opaquePoints(layer,keep=()=>true,stride=1){
@@ -246,7 +246,7 @@ export function buildParts(layers,rig){
     const separated=separateSleeve(original,rig,i);
     for(const l of separated||[original]){
       const mode=l.role==='sleeve'?l.mode:rig.modes[i],bone=l.role==='sleeve'?l.bone:rig.assignments[i];
-      const garment=mode==='bottoms'||mode.startsWith('sleeve_'),split=cutout&&!garment&&mode!=='rigid'?splitLimb(l,rig,mode):null;
+      const garment=mode==='bottoms'||mode==='torso'||mode==='neck'||mode.startsWith('sleeve_'),split=cutout&&!garment&&mode!=='rigid'?splitLimb(l,rig,mode):null;
       const sides=!cutout&&(mode==='legs'||mode==='feet')&&l.data?splitMeshSides(l,rig,mode):null;
       if(sides?.length)parts.push(...sides.map(p=>({...p,source:i})));
       else if(split?.length)parts.push(...split.map(p=>({...p,source:i})));
@@ -290,17 +290,20 @@ function meshChain(rig,mode,x,y){
     if(parent===ids[i-1])out.push(...between.reverse());out.push(ids[i]);
   }
   // Bottoms: waistband on the hip's parent (lower body), each trouser leg on its thigh → shin.
-  if(mode==='bottoms')out.unshift(rig.parents[ids[0]]||'pelvis');
+  // Bare limbs likewise start on the torso side, so shoulders and hips stretch instead of breaking.
+  const parent=rig.parents[ids[0]];if(mode==='bottoms')out.unshift(parent||'pelvis');else if(parent&&rig.points[parent])out.unshift(parent);
   return out;
 }
 const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
 export function partBoneCandidates(rig,index,mode=rig.modes[index],bone=rig.assignments[index]){
   if(mode==='rigid')return [bone];
+  if(mode==='torso'||mode==='neck'){const names=spineGuide({},rig,mode).names;return mode==='torso'?[...names,...['arm_left','arm_right'].filter(id=>rig.points[id])]:names;}
   if(mode==='bottoms')return [...new Set(['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?meshChain(rig,mode,h.x,h.y):[];}))];
   const p=rig.points[bone]||{x:0,y:0};return [...new Set(meshChain(rig,mode,p.x,p.y))];
 }
 function weightGuide(layer,rig,mode,bone,x,y){
   if(mode==='rigid')return {names:[bone],joints:[]};
+  if(mode==='torso'||mode==='neck')return spineGuide(layer,rig,mode);
   const names=meshChain(rig,mode,x,y),points=names.map(id=>rig.points[id]),joints=[];
   for(let i=1;i<names.length;i++){
     const prev=points[i-1],p=points[i],next=points[i+1];
@@ -309,22 +312,56 @@ function weightGuide(layer,rig,mode,bone,x,y){
     // A sleeve blends across the shoulder along the arm, not along the chest→shoulder line.
     if(mode.startsWith('sleeve_')){const e=rig.points[`elbow_${mode.slice(7)}`];dir=e&&unit(e.x-p.x,e.y-p.y)||dir;}
     // Trouser legs blend across the hip along the thigh; the short pelvis→hip offset must not cap the band.
-    const garmentHip=mode==='bottoms'&&i===1;if(garmentHip&&next)dir=unit(next.x-p.x,next.y-p.y)||dir;
-    const len=garmentHip&&next?Math.hypot(next.x-p.x,next.y-p.y):Math.hypot(p.x-prev.x,p.y-prev.y),after=next?Math.hypot(next.x-p.x,next.y-p.y):len;
+    const garmentHip=mode==='bottoms'&&i===1,limbRoot=i===1&&!mode.startsWith('sleeve_')&&!garmentHip;if((garmentHip||limbRoot)&&next)dir=unit(next.x-p.x,next.y-p.y)||dir;
+    const len=(garmentHip||limbRoot)&&next?Math.hypot(next.x-p.x,next.y-p.y):Math.hypot(p.x-prev.x,p.y-prev.y),after=next?Math.hypot(next.x-p.x,next.y-p.y):len;
     const maxBand=Math.max(1,Math.min(len,after)*.3);
     const thickness=layer.data?halfWidth(layer,p,dir):null;
     const blend=clamp(Number(rig.weightBlend?.[names[i]])||1,.35,2);
     // The whole waist is wider than one trouser leg, so a garment hip uses a thigh-length band instead.
     const band=clamp((garmentHip?len*.18:thickness===null?Math.min(len,after)*.12:Math.max(2,thickness)*1.25)*blend,1,maxBand);
-    joints.push({id:names[i],p,dir,band});
+    // Shoulder / hip: most of the blend sits on the torso side, so the limb itself still rotates fully.
+    joints.push({id:names[i],p,dir,band,shift:limbRoot?-band*.5:0});
   }
   const requested=rig.partBones?.[layer.source],allowed=Array.isArray(requested)?names.filter(n=>requested.includes(n)):names;
   return {names,joints,allowed:allowed.length?allowed:names,points};
 }
+// Shirts and necks bend along the spine: lower body → waist → chest (→ neck → head).
+function spineGuide(layer,rig,mode){
+  const P=rig.points,names=[];let n=mode==='neck'?'head':'chest';
+  while(n&&n!=='body'&&n!=='root'&&names.length<64){names.unshift(n);if(mode==='neck'&&n===(rig.parents.neck||'chest'))break;n=rig.parents[n];}
+  if(mode==='torso')names.unshift(P.pelvis?'pelvis':'body');
+  if(mode==='neck'&&names[0]==='neck')names.unshift(rig.parents.neck||'chest');
+  const valid=names.filter(id=>P[id]),top=P.neck||P.head,base=P.body||P.pelvis,up=top&&base&&unit(top.x-base.x,top.y-base.y)||{x:0,y:-1},torsoLen=top&&base?Math.hypot(top.x-base.x,top.y-base.y):rig.height*.25,joints=[];
+  for(let i=1;i<valid.length;i++){
+    const id=valid[i],p=id==='upper'&&P.body?P.body:P[id],prev=P[valid[i-1]],gap=Math.max(4,Math.hypot(p.x-prev.x,p.y-prev.y));
+    const blend=clamp(Number(rig.weightBlend?.[id])||1,.35,2);
+    // The waist gets a wide band (body → hem); chest / neck / head bands follow their bone spacing.
+    const band=clamp((i===1&&mode==='torso'?torsoLen*.14:gap*.35)*blend,2,torsoLen*.3);
+    joints.push({id,p,dir:up,band,shift:mode==='neck'&&id==='head'?-band*.3:0});
+  }
+  const options=mode==='torso'?[...valid,...['arm_left','arm_right'].filter(id=>P[id])]:valid,requested=rig.partBones?.[layer.source],allowed=Array.isArray(requested)?options.filter(v=>requested.includes(v)):options;
+  return {names:valid,joints,allowed:allowed.length?allowed:valid,points:valid.map(id=>P[id])};
+}
+// Sleeves painted into the shirt follow the upper arm; the armpit side stays on the torso.
+function shirtArm(rig,x,y){
+  let best=null;
+  for(const side of ['left','right']){
+    const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`],C=rig.points.chest;if(!A||!E||!C)continue;
+    const len=Math.hypot(E.x-A.x,E.y-A.y);if(len<4)continue;const d={x:(E.x-A.x)/len,y:(E.y-A.y)/len};let o={x:-d.y,y:d.x};if(o.x*(A.x-C.x)+o.y*(A.y-C.y)<0)o={x:-o.x,y:-o.y};
+    const r=len*.2,blend=clamp(Number(rig.weightBlend?.[`arm_${side}`])||1,.35,2),t=(x-A.x)*d.x+(y-A.y)*d.y,u=(x-A.x)*o.x+(y-A.y)*o.y;
+    // Only the sleeve: past ~¾ of the upper arm the shirt is torso again.
+    const w=smooth((t+r*.3*blend)/(r*blend))*smooth((u+r*1.5)/(r*.6))*(1-smooth((t-len*.75)/(len*.2)));if(w>.005&&(!best||w>best[1]))best=[`arm_${side}`,w];
+  }
+  return best;
+}
+function shirtWeights(guide,weights,x,y,rig){
+  const arm=shirtArm(rig,x,y);if(!arm||guide.allowed&&!guide.allowed.includes(arm[0]))return weights;
+  const main=weights.reduce((a,b)=>b[1]>a[1]?b:a);return [[main[0],1-arm[1]],arm].filter(([,w])=>w>=.005);
+}
 function guideWeights(guide,x,y){
   const weights=[];let remaining=1;
   for(let i=0;i<guide.joints.length;i++){
-    const {p,dir,band}=guide.joints[i],t=smooth((((x-p.x)*dir.x+(y-p.y)*dir.y)/band+1)/2);
+    const {p,dir,band,shift=0}=guide.joints[i],t=smooth((((x-p.x)*dir.x+(y-p.y)*dir.y-shift)/band+1)/2);
     weights.push([guide.names[i],remaining*(1-t)]);remaining*=t;
   }
   weights.push([guide.names.at(-1),remaining]);
@@ -362,6 +399,7 @@ function meshAxis(size,offset,joints,key){
 }
 export function buildMesh(layer,rig,mode,bone,setup){
   const guide=weightGuide(layer,rig,mode,bone,layer.x+layer.width/2,layer.y+layer.height/2);
+  if(mode==='torso')for(const side of ['left','right']){const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`];const d=A&&E&&unit(E.x-A.x,E.y-A.y);if(d)guide.joints=[...guide.joints,{id:`arm_${side}`,p:A,dir:d,band:Math.hypot(E.x-A.x,E.y-A.y)*.2}];}
   if(mode==='bottoms')guide.joints=['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?weightGuide(layer,rig,mode,bone,h.x,h.y).joints:[];});
   const topology=silhouetteTopology(layer,guide.joints,rig.meshDensity,mode==='bottoms'?crotchPoints(layer,rig):[]);
   const xs=meshAxis(layer.width,layer.x,guide.joints,'x'),ys=meshAxis(layer.height,layer.y,guide.joints,'y');
@@ -373,7 +411,7 @@ export function buildMesh(layer,rig,mode,bone,setup){
   if(topology)hull=topology.hull;
   for(const [lx0,ly0]of coords){const x=layer.x+lx0,y=layer.y+ly0;uvs.push(lx0/layer.width,ly0/layer.height);
     const g=mode==='bottoms'||mode==='legs'||mode==='feet'?weightGuide(layer,rig,mode,bone,x,y):guide;
-    const weights=mode==='bottoms'?crotchWeights(rig,g,guideWeights(g,x,y),x):guideWeights(g,x,y);vertices.push(weights.length);
+    const weights=mode==='bottoms'?crotchWeights(rig,g,guideWeights(g,x,y),x):mode==='torso'?shirtWeights(g,guideWeights({...g,joints:g.joints.filter(j=>!/^arm_/.test(j.id))},x,y),x,y,rig):guideWeights(g,x,y);vertices.push(weights.length);
     for(const [b,w]of weights){const [lx,ly]=toLocal(setup.world,b,x-root.x,root.y-y);vertices.push(setup.order.indexOf(b),round(lx),round(ly),w);}}
   if(!topology)for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){const a=lookup.get(`${x},${y}`),b=lookup.get(`${x+1},${y}`),c=lookup.get(`${x},${y+1}`),d=lookup.get(`${x+1},${y+1}`);triangles.push(a,c,b,b,c,d);}
   const pairs=new Set(),edges=[];for(let i=0;i<triangles.length;i+=3)for(const [a,b]of [[triangles[i],triangles[i+1]],[triangles[i+1],triangles[i+2]],[triangles[i+2],triangles[i]]]){const key=`${Math.min(a,b)},${Math.max(a,b)}`;if(!pairs.has(key)){pairs.add(key);edges.push(a*2,b*2);}}
@@ -490,8 +528,11 @@ export function upgradeRig(rig){
 // A joint the user placed on the canvas.
 // Older projects pinned bottoms to the pelvis; make them follow the legs once (later manual choices stick).
 export function upgradeGarments(rig,layers){
-  if(rig.garments)return rig;rig.garments=1;
-  layers.forEach((l,i)=>{if(rig.modes[i]==='rigid'&&/bottomwear|하의|skirt|치마/i.test(l.name||'')&&/^(pelvis|body|root)$/.test(rig.assignments[i])){rig.modes[i]='bottoms';rig.assignments[i]=rig.points.pelvis?'pelvis':rig.assignments[i];}});
+  const version=rig.garments||0;if(version>=2)return rig;rig.garments=2;
+  layers.forEach((l,i)=>{if(rig.modes[i]!=='rigid')return;const n=(l.name||'').toLowerCase();
+    if(version<1&&/bottomwear|하의|skirt|치마/.test(n)&&/^(pelvis|body|root)$/.test(rig.assignments[i])){rig.modes[i]='bottoms';rig.assignments[i]=rig.points.pelvis?'pelvis':rig.assignments[i];}
+    else if(/^(topwear|상의)/.test(n)&&rig.assignments[i]==='chest')rig.modes[i]='torso';
+    else if(/^(neck|목)$/.test(n)&&rig.assignments[i]==='neck')rig.modes[i]='neck';});
   return rig;
 }
 export function addJointAt(rig,label,parent,x,y){const id=addJoint(rig,label,parent);rig.points[id]={x:clamp(x,0,rig.width),y:clamp(y,0,rig.height)};return id;}
