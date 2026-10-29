@@ -1,3 +1,6 @@
+import {installRigFeatures} from './rig-feature-ui.js';
+import {activeIds,activeBone,validateControls} from './rig-scope.js';
+import {rotateJoint,setChainMode,initializeControls} from './rig-motion.js';
 import {psdDocument} from './psd-document.js';
 import {auditRig} from './rig-audit.js';
 import {initSleeves,suggestSleeve,cuffLine} from './garment-parts.js';
@@ -11,14 +14,14 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   const $=id=>document.getElementById(id);let placing=false,project=null,playing=false,processing=false,raf=0,started=0,cached=null,cachedParts=null,drag=null,history=[],future=[];
   let viewZoom=1;
   function fitPreview(){if(!project||!$('rigDialog').open)return;const c=$('rigCanvas'),box=c.parentElement,w=box.clientWidth,h=box.clientHeight;if(!w||!h)return;const scale=Math.min(w/project.rig.width,h/project.rig.height)*viewZoom;c.style.width=`${project.rig.width*scale}px`;c.style.height=`${project.rig.height*scale}px`;$('rigZoomValue').textContent=`${Math.round(viewZoom*100)}%`;}
-  for(const key of ['Joints','Parts','Finish'])$('rigTab'+key).onclick=()=>{for(const k of ['Joints','Parts','Finish']){$('rigTab'+k).setAttribute('aria-selected',String(k===key));$('rigPanel'+k).hidden=k!==key;}fitPreview();draw();};
+  for(const key of ['Joints','Parts','Templates','Finish'])$('rigTab'+key).onclick=()=>{for(const k of ['Joints','Parts','Templates','Finish']){$('rigTab'+k).setAttribute('aria-selected',String(k===key));$('rigPanel'+k).hidden=k!==key;}fitPreview();draw();};
   $('rigZoomIn').onclick=()=>{viewZoom=Math.min(4,viewZoom+.25);fitPreview();draw();};$('rigZoomOut').onclick=()=>{viewZoom=Math.max(.5,viewZoom-.25);fitPreview();draw();};$('rigZoomFit').onclick=()=>{viewZoom=1;fitPreview();draw();};$('rigOnlyPart').onchange=()=>draw();
   new ResizeObserver(()=>{fitPreview();if(project&&$('rigDialog').open)draw();}).observe($('rigCanvas').parentElement);
   const metadata=l=>({name:l.name,x:l.x,y:l.y,width:l.canvas.width,height:l.canvas.height,opacity:l.opacity,visible:l.visible});
   const pixelCache=new WeakMap(),pixels=c=>{if(!pixelCache.has(c))pixelCache.set(c,c.getContext('2d').getImageData(0,0,c.width,c.height).data);return pixelCache.get(c);};
   const stop=()=>{playing=false;cancelAnimationFrame(raf);$('rigPlay').textContent='모션 재생';};
   const message=text=>{$('rigStatus').textContent=text;};
-  let spinePreview;const dirty=()=>{cached=null;cachedParts=null;spinePreview?.changed();state.onEdited?.();if($('rigAuditSummary').textContent){$('rigAuditSummary').textContent='작업이 변경됐어요. 점검을 다시 실행해주세요.';$('rigAuditResults').replaceChildren();}};
+  let spinePreview,features;const dirty=()=>{cached=null;cachedParts=null;spinePreview?.changed();state.onEdited?.();if($('rigAuditSummary').textContent){$('rigAuditSummary').textContent='작업이 변경됐어요. 점검을 다시 실행해주세요.';$('rigAuditResults').replaceChildren();}};
   const assist=()=>state.server?.rigAssist?state.server:null;
   const fillKey=()=>JSON.stringify([project.hiddenKey,project.rig.points,project.rig.limbStyle,project.rig.modes,project.rig.sleeves,$('rigStrength').value,project.removed]);
   async function call(path,body,type){const server=assist();const r=await fetch(server.url+path,{method:'POST',headers:{Authorization:`Bearer ${server.token}`,'Content-Type':type},body,signal:AbortSignal.timeout(300000)});if(!r.ok){let e;try{e=await r.json();}catch{}throw Error(e?.detail||`서버 오류 (${r.status})`);}return r.json();}
@@ -54,10 +57,10 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   const redo=()=>restoreHistory(future,history,'되돌린 작업을 다시 적용했어요.');
   const poseMode=()=>$('rigMode').value==='pose';
   const selected=()=>$('rigBone').value;
-  const status=()=>{const n=parts().length,meshes=Object.values(skeleton().skins[0].attachments).map(a=>Object.values(a)[0]).filter(a=>a.type==='mesh'),vertices=meshes.reduce((n,a)=>n+a.uvs.length/2,0);message(`Spine 파츠 ${n}개 · 메쉬 ${meshes.length}개 / 정점 ${vertices}개 · 관절 ${Object.keys(project.rig.points).length}개. ${meshes.length?'가중치 포함: Spine에서 다시 붙일 필요 없어요.':'파츠 회전 방식입니다. 메쉬·가중치 적용으로 전환하세요.'}`);};
+  const status=()=>{const n=parts().length,meshes=Object.values(skeleton().skins[0].attachments).map(a=>Object.values(a)[0]).filter(a=>a.type==='mesh'),vertices=meshes.reduce((n,a)=>n+a.uvs.length/2,0);message(`Spine 파츠 ${n}개 · 메쉬 ${meshes.length}개 / 정점 ${vertices}개 · 관절 ${activeIds(project.rig).length}개. ${meshes.length?'가중치 포함: Spine에서 다시 붙일 필요 없어요.':'파츠 회전 방식입니다. 메쉬·가중치 적용으로 전환하세요.'}`);};
   function menus(id=selected()||'body'){
-    const opts=()=>boneOrder(project.rig).filter(k=>k!=='root').map(k=>new Option(project.rig.labels[k]||k,k));
-    $('rigBone').replaceChildren(...opts());$('rigBone').value=project.rig.points[id]?id:'body';
+    const opts=()=>boneOrder(project.rig).filter(k=>k!=='root'&&activeIds(project.rig).includes(k)).map(k=>new Option(project.rig.labels[k]||k,k));
+    $('rigBone').replaceChildren(...opts());$('rigBone').value=activeIds(project.rig).includes(id)?id:'body';
     $('rigParent').replaceChildren(new Option('전체 기준','root'),...opts());
     $('rigBind').replaceChildren(new Option('전체 기준','root'),...opts());
     $('rigLayer').replaceChildren(...project.meta.map((l,i)=>new Option(l.name,String(i))));
@@ -72,7 +75,7 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
         refineRig(rig,source.map((l,i)=>({...meta[i],data:pixels(l.canvas)})));initSleeves(source.map((l,i)=>({...meta[i],data:pixels(l.canvas)})),rig);
         project={ids:state.layers.map(l=>l.id).join('|'),source,layers:source,rig,meta,removed:0};history=[];future=[];$('rigStrength').value='1';$('rigAmplitude').value='1';}
       else{project.meta=state.layers.map(metadata);const ids=project.source.map(l=>l.id);project.source=state.layers.map(l=>({...l,canvas:project.source[ids.indexOf(l.id)]?.canvas||l.canvas}));project.layers=project.layers.map((l,i)=>({...l,...project.meta[i]}));}
-      dirty();$('rigMode').value='setup';menus();if(options.show!==false&&!$('rigDialog').open)$('rigDialog').showModal();if(!same){message('경계를 정리하고 있어요…');await new Promise(r=>setTimeout(r,30));await cleanup();try{if(options.detect!==false)await detectJoints();}catch(e){message(`AI 관절 인식 실패 · 모양 기반 추정 사용 (${e.message})`);}}draw();return true;
+      initializeControls(project.rig);dirty();$('rigMode').value='setup';menus();if(options.show!==false&&!$('rigDialog').open)$('rigDialog').showModal();if(!same){message('경계를 정리하고 있어요…');await new Promise(r=>setTimeout(r,30));await cleanup();try{if(options.detect!==false)await detectJoints();}catch(e){message(`AI 관절 인식 실패 · 모양 기반 추정 사용 (${e.message})`);}}draw();return true;
     }catch(e){message(e.message);toast(e.message);return false;}
   }
   async function cleanup(){
@@ -126,6 +129,7 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     if($('rigShowBones').checked){const points=jointPositions(time),scale=width/Math.max(200,c.getBoundingClientRect().width);ctx.lineWidth=1.5*scale;ctx.font=`${11*scale}px sans-serif`;
       for(const id of Object.keys(points)){if(id==='root')continue;const p=points[id],parent=points[project.rig.parents[id]],active=id===selected();ctx.strokeStyle=active?'#e67916':'#096e65';ctx.fillStyle=active?'#ffd08c':'#a1ffdd';if(parent&&project.rig.parents[id]!=='root'){ctx.beginPath();ctx.moveTo(parent.x,parent.y);ctx.lineTo(p.x,p.y);ctx.stroke();}ctx.beginPath();ctx.arc(p.x,p.y,(active?6:4)*scale,0,Math.PI*2);ctx.fill();ctx.stroke();if(active){ctx.fillStyle='#102c33';ctx.fillText(`${project.rig.labels[id]||id} · ${spineName(id)}`,p.x+10*scale,p.y-9*scale);}}
     }
+    features?.overlay(ctx,time);
   }
   function updateWeightSelection(){
     if(!project)return;const id=selected(),name=project.rig.labels[id]||id,bone=spineName(id),weighted=[],fixed=[],sk=skeleton();
@@ -139,8 +143,8 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     if(!belongs(current)){const related=project.meta.findIndex((_,i)=>belongs(i));if(related>=0)$('rigLayer').value=String(related);}
     fields();binding();if(reveal){$('rigTabJoints').click();$('rigPanelJoints').parentElement.scrollTop=0;}
   }
-  function fields(){if(!project)return;const id=selected(),p=project.rig.points[id];updateWeightSelection();$('rigPoseReset').disabled=!project.rig.pose[id];$('rigWeightBlend').value=project.rig.weightBlend?.[id]??1;$('rigWeightBlendValue').textContent=`${Number($('rigWeightBlend').value).toFixed(2)}배`;$('rigWeightBlend').disabled=project.rig.limbStyle!=='mesh'||! /^(elbow|wrist|knee|ankle|joint)_/.test(id);$('rigX').value=Math.round(p.x*10)/10;$('rigY').value=Math.round(p.y*10)/10;$('rigParent').value=project.rig.parents[id];$('rigAngle').value=project.rig.pose[id]||0;$('rigAngleInput').value=project.rig.pose[id]||0;$('rigAngleValue').textContent=`${project.rig.pose[id]||0}°`;$('rigDelete').disabled=!!boneLabels[id];$('rigUndo').disabled=!history.length;$('rigX').disabled=$('rigY').disabled=poseMode();$('rigAngle').disabled=$('rigAngleInput').disabled=$('rigAngleReset').disabled=!poseMode();draw();}
-  function binding(){const i=Number($('rigLayer').value);sleeveFields();$('rigBind').value=project.rig.assignments[i];$('rigDeform').value=project.rig.modes[i];influenceFields();draw();}
+  function fields(){if(!project)return;const id=selected(),p=project.rig.points[id];updateWeightSelection();$('rigPoseReset').disabled=!project.rig.pose[id];$('rigWeightBlend').value=project.rig.weightBlend?.[id]??1;$('rigWeightBlendValue').textContent=`${Number($('rigWeightBlend').value).toFixed(2)}배`;$('rigWeightBlend').disabled=project.rig.limbStyle!=='mesh'||! /^(elbow|wrist|knee|ankle|joint)_/.test(id);$('rigX').value=Math.round(p.x*10)/10;$('rigY').value=Math.round(p.y*10)/10;$('rigParent').value=project.rig.parents[id];$('rigAngle').value=project.rig.pose[id]||0;$('rigAngleInput').value=Math.round((project.rig.pose[id]||0)*10)/10;$('rigAngleValue').textContent=`${Math.round((project.rig.pose[id]||0)*10)/10}°`;$('rigDelete').disabled=!!boneLabels[id];$('rigUndo').disabled=!history.length;$('rigX').disabled=$('rigY').disabled=poseMode();$('rigAngle').disabled=$('rigAngleInput').disabled=$('rigAngleReset').disabled=!poseMode();features?.controlFields();draw();}
+  function binding(){const i=Number($('rigLayer').value);sleeveFields();$('rigBind').value=activeBone(project.rig,project.rig.assignments[i]);$('rigDeform').value=project.rig.modes[i];influenceFields();draw();}
   function sleeveFields(){
     const i=Number($('rigLayer').value),isArm=/^arm_(left|right)$/.test(project.rig.modes[i]),cfg=project.rig.sleeves?.[i];
     $('rigSleeveTools').hidden=!isArm;$('rigSleeveEnabled').checked=!!cfg?.enabled;
@@ -169,23 +173,23 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   }
   $('rigPartBonesReset').onclick=()=>{remember();if(project.rig.partBones)delete project.rig.partBones[Number($('rigLayer').value)];dirty();binding();status();};
   $('rigMeshDensity').onchange=()=>{remember();project.rig.meshDensity=$('rigMeshDensity').value;stop();dirty();binding();status();};
-  function setPoint(x,y){if(!Number.isFinite(x)||!Number.isFinite(y))return;const {width,height}=project.rig;project.rig.points[selected()]={x:Math.max(0,Math.min(width,x)),y:Math.max(0,Math.min(height,y))};dirty();fields();}
+  function setPoint(x,y){if(!Number.isFinite(x)||!Number.isFinite(y))return;const {width,height}=project.rig;project.rig.points[selected()]={x:Math.max(0,Math.min(width,x)),y:Math.max(0,Math.min(height,y))};for(const [key,mode]of Object.entries(project.rig.ikModes||{}))if(mode==='ik')setChainMode(project.rig,key,'ik');dirty();fields();}
   const mouse=e=>{const r=$('rigCanvas').getBoundingClientRect();return {x:(e.clientX-r.left)/r.width*project.rig.width,y:(e.clientY-r.top)/r.height*project.rig.height};};
-  $('rigCanvas').onpointerdown=e=>{if(!project||playing)return;if(placing){const pos=mouse(e);placing=false;$('rigAdd').classList.remove('primary');try{remember();const between=$('rigInsertMode').value==='between',id=(between?insertJointAt:addJointAt)(project.rig,$('rigJointName').value,selected(),pos.x,pos.y);$('rigJointName').value='';dirty();menus(id);message(`'${project.rig.labels[id]}' 관절을 추가했어요. 아래 '파츠와 관절 연결'에서 이 관절로 움직일 파츠를 지정하세요.`);}catch(err){message(err.message);}return;}const pos=mouse(e),points=jointPositions(),radius=16*project.rig.width/$('rigCanvas').getBoundingClientRect().width;let nearest=null,best=radius;for(const [id,p]of Object.entries(points)){if(id==='root')continue;const dist=Math.hypot(pos.x-p.x,pos.y-p.y);if(dist<best){nearest=id;best=dist;}}
-    if(nearest)selectJoint(nearest,true);if(poseMode()){if(nearest)message('각도 슬라이더로 선택한 관절을 굽혀보세요.');return;}if(!nearest)return;
+  $('rigCanvas').onpointerdown=e=>{if(!project||playing||processing)return;if(placing){const pos=mouse(e);placing=false;$('rigAdd').classList.remove('primary');try{remember();const between=$('rigInsertMode').value==='between',id=(between?insertJointAt:addJointAt)(project.rig,$('rigJointName').value,selected(),pos.x,pos.y);$('rigJointName').value='';dirty();menus(id);message(`'${project.rig.labels[id]}' 관절을 추가했어요. 아래 '파츠와 관절 연결'에서 이 관절로 움직일 파츠를 지정하세요.`);}catch(err){message(err.message);}return;}const pos=mouse(e),points=jointPositions(),radius=16*project.rig.width/$('rigCanvas').getBoundingClientRect().width;let nearest=null,best=radius;for(const [id,p]of Object.entries(points)){if(id==='root')continue;const dist=Math.hypot(pos.x-p.x,pos.y-p.y);if(dist<best){nearest=id;best=dist;}}
+    if(poseMode()){features.pointerDown(e,pos,nearest);return;}if(nearest)selectJoint(nearest,true);if(!nearest)return;
     remember();drag={id:selected(),dx:project.rig.points[selected()].x-pos.x,dy:project.rig.points[selected()].y-pos.y};$('rigCanvas').setPointerCapture(e.pointerId);$('rigCanvas').focus();e.preventDefault();};
-  $('rigCanvas').onpointermove=e=>{if(!drag)return;const p=mouse(e);setPoint(p.x+drag.dx,p.y+drag.dy);};
-  const endDrag=e=>{if(!drag)return;drag=null;if($('rigCanvas').hasPointerCapture(e.pointerId))$('rigCanvas').releasePointerCapture(e.pointerId);status();};$('rigCanvas').onpointerup=endDrag;$('rigCanvas').onpointercancel=endDrag;
+  $('rigCanvas').onpointermove=e=>{const p=mouse(e);if(features.pointerMove(p))return;if(!drag)return;setPoint(p.x+drag.dx,p.y+drag.dy);};
+  const endDrag=e=>{if(features.pointerEnd(e)){status();return;}if(!drag)return;drag=null;if($('rigCanvas').hasPointerCapture(e.pointerId))$('rigCanvas').releasePointerCapture(e.pointerId);status();};$('rigCanvas').onpointerup=endDrag;$('rigCanvas').onpointercancel=endDrag;
   $('rigCanvas').onkeydown=e=>{if(!project||poseMode()||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();remember();const p=project.rig.points[selected()],step=e.shiftKey?10:1;setPoint(p.x+(e.key==='ArrowLeft'?-step:e.key==='ArrowRight'?step:0),p.y+(e.key==='ArrowUp'?-step:e.key==='ArrowDown'?step:0));};
   $('rigX').onchange=$('rigY').onchange=()=>{remember();setPoint(Number($('rigX').value),Number($('rigY').value));};
-  $('rigBone').onchange=()=>{stop();selectJoint(selected());};$('rigLayer').onchange=()=>{$('rigBone').value=project.rig.assignments[Number($('rigLayer').value)];fields();binding();};
+  $('rigBone').onchange=()=>{stop();selectJoint(selected());};$('rigLayer').onchange=()=>{$('rigBone').value=activeBone(project.rig,project.rig.assignments[Number($('rigLayer').value)]);fields();binding();};
   $('rigBind').onchange=()=>{remember();project.rig.assignments[Number($('rigLayer').value)]=$('rigBind').value;project.rig.modes[Number($('rigLayer').value)]='rigid';if(project.rig.partBones)delete project.rig.partBones[Number($('rigLayer').value)];stop();dirty();binding();status();};
   $('rigDeform').onchange=()=>{remember();project.rig.modes[Number($('rigLayer').value)]=$('rigDeform').value;if(project.rig.partBones)delete project.rig.partBones[Number($('rigLayer').value)];stop();dirty();binding();status();};
   $('rigLimbStyle').onchange=()=>{remember();project.rig.limbStyle=$('rigLimbStyle').value;stop();dirty();fields();influenceFields();status();};
   $('rigRefineMesh').onclick=()=>{if(!project||processing)return;remember();project.rig.limbStyle='mesh';$('rigLimbStyle').value='mesh';$('rigShowMesh').checked=true;stop();dirty();fields();influenceFields();status();};
   $('rigShowMesh').onchange=$('rigShowWeights').onchange=()=>draw();
   let weightHistory=false;$('rigWeightBlend').oninput=()=>{if(!project)return;stop();if(!weightHistory){remember();weightHistory=true;}project.rig.weightBlend??={};project.rig.weightBlend[selected()]=Number($('rigWeightBlend').value);dirty();fields();influenceFields();status();};$('rigWeightBlend').onchange=()=>weightHistory=false;
-  $('rigIK').onchange=()=>{remember();project.rig.ik=$('rigIK').checked;dirty();};
+  $('rigIK').onchange=()=>{remember();project.rig.ik=$('rigIK').checked;if(!project.rig.ik)for(const key of Object.keys(project.rig.ikModes||{}))setChainMode(project.rig,key,'fk');dirty();fields();};
   $('rigAnim').onchange=()=>{if(playing){started=performance.now();}else draw();};
   $('rigParent').onchange=()=>{try{remember();setParent(project.rig,selected(),$('rigParent').value);dirty();menus();}catch(e){message(e.message);fields();}};
   $('rigAdd').onclick=()=>{if(!project)return;if($('rigMode').value!=='setup'){$('rigMode').value='setup';fields();}stop();placing=!placing;$('rigAdd').classList.toggle('primary',placing);const name=k=>project.rig.labels[k]||k,sel=selected();if(placing&&$('rigInsertMode').value==='between'&&sel==='root'){placing=false;$('rigAdd').classList.remove('primary');message('전체 기준 위에는 넣을 수 없어요.');return;}
@@ -199,9 +203,9 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     e.preventDefault();(e.shiftKey?redo:undo)();
   });
   $('rigReinfer').onclick=()=>{if(!project)return;remember();const fresh=inferRig(project.meta,project.rig.width,project.rig.height);refineRig(fresh,project.layers.map((l,i)=>({...project.meta[i],data:pixels(l.canvas)})));for(const id of Object.keys(fresh.points))if(boneLabels[id])project.rig.points[id]=fresh.points[id];dirty();fields();status();message('관절 위치를 파츠 모양에서 다시 추정했어요. 추가 관절과 연결 설정은 유지됩니다.');};
-  $('rigMode').onchange=()=>{stop();fields();message(poseMode()?'관절을 선택하고 각도를 조절하세요. 저장하면 manual_pose 동작에 포함됩니다.':'관절 점을 드래그하거나 X·Y를 입력하세요. 방향키 1px / Shift+방향키 10px.');};
-  let angleHistory=false;$('rigAngle').oninput=()=>{stop();if(!angleHistory){remember();angleHistory=true;}project.rig.pose[selected()]=Number($('rigAngle').value);$('rigPoseReset').disabled=!project.rig.pose[selected()];$('rigAngleValue').textContent=`${$('rigAngle').value}°`;$('rigAngleInput').value=$('rigAngle').value;dirty();draw();};$('rigAngle').onchange=()=>angleHistory=false;
-  const setAngle=v=>{if(!Number.isFinite(v))return;stop();remember();v=Math.max(-180,Math.min(180,Math.round(v*10)/10));if(v)project.rig.pose[selected()]=v;else delete project.rig.pose[selected()];dirty();fields();};
+  $('rigMode').onchange=()=>{stop();fields();message(poseMode()?'주황 회전 손잡이를 끌거나 IK 손·발의 파란 사각점을 끌어보세요. 저장하면 manual_pose에 포함됩니다.':'관절 점을 드래그하거나 X·Y를 입력하세요. 방향키 1px / Shift+방향키 10px.');};
+  let angleHistory=false;$('rigAngle').oninput=()=>{stop();if(!angleHistory){remember();angleHistory=true;}rotateJoint(project.rig,selected(),Number($('rigAngle').value));features.controlFields();$('rigPoseReset').disabled=!project.rig.pose[selected()];$('rigAngleValue').textContent=`${$('rigAngle').value}°`;$('rigAngleInput').value=$('rigAngle').value;dirty();draw();};$('rigAngle').onchange=()=>angleHistory=false;
+  const setAngle=v=>{if(!Number.isFinite(v))return;stop();remember();v=Math.max(-180,Math.min(180,Math.round(v*10)/10));rotateJoint(project.rig,selected(),v);dirty();fields();};
   $('rigAngleInput').onchange=()=>setAngle(Number($('rigAngleInput').value));$('rigAngleInput').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();setAngle(Number($('rigAngleInput').value));}};
   $('rigAngleReset').onclick=()=>setAngle(0);
   $('rigPoseReset').onclick=()=>{setAngle(0);message(`${project.rig.labels[selected()]||selected()}의 포즈 각도만 초기화했어요. 다른 관절은 유지됩니다.`);};
@@ -240,7 +244,8 @@ parts.psd: 잘린 파츠를 PSD로 저장한 파일. 원화 담당자가 관절 
 [애니메이션]
 idle, wave, cheer, hop: 자동 생성된 FK 템플릿. 미리보기와 같게 하려고 이 동작들에서는 IK mix를 0으로 둡니다.
 manual_pose: 웹에서 맞춘 포즈.
-새 애니메이션을 Spine에서 만들 때는 빨간 ik_ 뼈대를 움직여 IK로 팔·다리를 조작할 수 있습니다.
+manual_pose에는 웹에서 선택한 부위별 IK/FK와 목표 위치가 포함됩니다.
+Spine에서는 해당 IK의 Mix가 1일 때 빨간 ik_ 뼈대를 움직이고, 0일 때 개별 본을 회전하세요.
 `);
     download(new Blob([zipSync(files,{level:1})],{type:'application/zip'}),filename()+'-spine.zip');message(`Spine ZIP을 저장했어요. 파츠 ${list.length}개 · Unity 패키지 포함.`);
   }catch(e){message(e.message);}finally{$('rigSave').disabled=false;draw();}};
@@ -266,7 +271,7 @@ manual_pose: 웹에서 맞춘 포즈.
     state.reference=reference;state.layers=layers;state.width=original.width;state.height=original.height;state.original=reference||original;state.name=saved.name||'관절 프로젝트';state.kind='관절 프로젝트';state.view='composite';state.selected=layers[0].id;
     project={syncId:saved.syncId||crypto.randomUUID(),ids:layers.map(l=>l.id).join('|'),source:layers,layers,meta:layers.map(metadata),rig:upgradeRig({limbStyle:'mesh',ik:true,...saved.rig}),removed:0};const split=splitLegLayers(layers.map((l,i)=>({...project.meta[i],...l,data:pixels(l.canvas)})),project.rig);
     if(split.changed){const separated=split.layers.map(l=>{if(l.canvas)return layers[l.sourceIndex];const c=canvas(l.width,l.height);c.getContext('2d').putImageData(new ImageData(l.data,l.width,l.height),0,0);return {...l,canvas:c};});project.layers=project.source=state.layers=separated;project.meta=separated.map(metadata);project.ids=separated.map(l=>l.id).join('|');state.selected=separated[0].id;}
-    upgradeGarments(project.rig,project.meta);initSleeves(project.layers.map((l,i)=>({...project.meta[i],data:pixels(l.canvas)})),project.rig);history=[];future=[];dirty();render();$('rigStrength').value=String(saved.strength??1);$('rigAmplitude').value=String(saved.amplitude??1);$('rigMode').value='setup';$('rigSeams').checked=saved.seams!==false;menus('body');if(!$('rigDialog').open)$('rigDialog').showModal();if(!saved.pixelsProcessed)await cleanup();if(saved.fill?.images){const images={};for(const [slot,url]of Object.entries(saved.fill.images)){const part=parts().find(p=>p.slot===slot);if(!part?.fill||typeof url!=='string'||!url.startsWith('data:image/png;base64,'))continue;const bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(url.slice(22)),c=>c.charCodeAt(0))],{type:'image/png'}));if(bitmap.width!==part.width||bitmap.height!==part.height){bitmap.close();throw Error('저장된 이음새 이미지 크기가 맞지 않아요.');}const c=canvas(part.width,part.height);c.getContext('2d').drawImage(bitmap,0,0);bitmap.close();images[slot]=pixels(c);}project.fill={key:fillKey(),images};dirty();draw();}message('저장한 보정 파츠·관절·포즈를 불러왔어요.');
+    upgradeGarments(project.rig,project.meta);initializeControls(project.rig);initSleeves(project.layers.map((l,i)=>({...project.meta[i],data:pixels(l.canvas)})),project.rig);history=[];future=[];dirty();render();$('rigStrength').value=String(saved.strength??1);$('rigAmplitude').value=String(saved.amplitude??1);$('rigMode').value='setup';$('rigSeams').checked=saved.seams!==false;menus('body');if(!$('rigDialog').open)$('rigDialog').showModal();if(!saved.pixelsProcessed)await cleanup();if(saved.fill?.images){const images={};for(const [slot,url]of Object.entries(saved.fill.images)){const part=parts().find(p=>p.slot===slot);if(!part?.fill||typeof url!=='string'||!url.startsWith('data:image/png;base64,'))continue;const bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(url.slice(22)),c=>c.charCodeAt(0))],{type:'image/png'}));if(bitmap.width!==part.width||bitmap.height!==part.height){bitmap.close();throw Error('저장된 이음새 이미지 크기가 맞지 않아요.');}const c=canvas(part.width,part.height);c.getContext('2d').drawImage(bitmap,0,0);bitmap.close();images[slot]=pixels(c);}project.fill={key:fillKey(),images};dirty();draw();}message('저장한 보정 파츠·관절·포즈를 불러왔어요.');
   }
   $('rigProjectInput').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>60*1024*1024)throw Error('편집 프로젝트는 60MB 이하로 열어주세요.');state.recoveryId=crypto.randomUUID();await restoreProject(JSON.parse(await file.text()));}catch(err){toast(err.message);}finally{e.target.value='';}};
   $('rigPsdSave').onclick=()=>{if(!currentProject()||processing)return;try{const bytes=writePsd(psdDocument(parts(),project.rig.width,project.rig.height),{generateThumbnail:false});download(new Blob([bytes],{type:'image/vnd.adobe.photoshop'}),filename()+'-parts.psd');message('보정된 소매·맨팔까지 그룹 PSD로 저장했어요.');}catch(e){message(`PSD 저장 실패: ${e.message}`);}};
@@ -275,9 +280,10 @@ manual_pose: 웹에서 맞춘 포즈.
   $('rigAnim').replaceChildren(...Object.entries(animationNames).map(([k,v])=>new Option(v,k)));
   spinePreview=installSpinePreview({download,canSend:()=>!!project&&!processing&&!state.busy,snapshot:()=>({name:state.name,projectId:project.syncId??=crypto.randomUUID(),skeleton:skeleton(),parts:parts()})});
   $('rigDialog').addEventListener('close',()=>spinePreview.update());
-  $('autoRigBtn').onclick=prepare;return {prepare,snapshot:snapshotProject,restore:restoreProject,exportLayers:()=>currentProject()?parts():null,isProcessing:()=>processing,repair:async()=>{await prepare({detect:false});if(!project)return;$('rigSeams').checked=true;await cleanup();$('rigDialog').close();toast(`접합선 ${project.seamPixels||0}픽셀 정리 · 목 빈틈 ${project.neckGapPixels||0}픽셀 보완. 레이어 PSD·PNG에도 반영됩니다.`);},update:()=>{$('autoRigBtn').disabled=state.busy||state.layers.length<2;$('rigProjectOpen').disabled=state.busy;spinePreview.update();}};
+  features=installRigFeatures({getProject:()=>project,isBusy:()=>processing||state.busy,pixels,selected,poseMode,remember,dirty,fields,menus,draw,stop,message,selectJoint,download});
+  $('autoRigBtn').onclick=()=>prepare({detect:false});return {prepare,snapshot:snapshotProject,restore:restoreProject,exportLayers:()=>currentProject()?parts():null,isProcessing:()=>processing,repair:async()=>{await prepare({detect:false});if(!project)return;$('rigSeams').checked=true;await cleanup();$('rigDialog').close();toast(`접합선 ${project.seamPixels||0}픽셀 정리 · 목 빈틈 ${project.neckGapPixels||0}픽셀 보완. 레이어 PSD·PNG에도 반영됩니다.`);},update:()=>{$('autoRigBtn').disabled=state.busy||state.layers.length<2;$('rigProjectOpen').disabled=state.busy;spinePreview.update();}};
 }
-function validateProject(s){
+export function validateProject(s){
   const finite=n=>typeof n==='number'&&Number.isFinite(n),positive=n=>Number.isInteger(n)&&n>0&&n<=8192;
   if(s?.format!=='layer-studio-rig-v2'||!Array.isArray(s.layers)||!s.layers.length||s.layers.length>100||!s.rig||!positive(s.rig.width)||!positive(s.rig.height)||s.rig.width*s.rig.height>16_000_000)throw Error('올바른 관절 편집 프로젝트가 아닙니다.');
   if(s.syncId!==undefined&&!/^[a-f0-9-]{36}$/.test(s.syncId))throw Error('연결 프로젝트 번호가 올바르지 않습니다.');
@@ -285,7 +291,7 @@ function validateProject(s){
   if(r.limbStyle!==undefined&&!['cutout','mesh'].includes(r.limbStyle)||r.ik!==undefined&&typeof r.ik!=='boolean')throw Error('리깅 방식 설정이 올바르지 않습니다.');
   for(const id of Object.keys(boneLabels))if(!r.points[id]&&id!=='upper'&&id!=='pelvis')throw Error('기본 관절이 누락되었습니다.');
   for(const id of names){const p=r.points[id];if(!/^(root|body|upper|pelvis|chest|neck|head|hair|arm_left|arm_right|elbow_left|elbow_right|wrist_left|wrist_right|hip_left|hip_right|knee_left|knee_right|ankle_left|ankle_right|joint_\d+)$/.test(id)||!finite(p.x)||!finite(p.y)||p.x<0||p.y<0||p.x>r.width||p.y>r.height||typeof r.labels[id]!=='string'||r.labels[id].length>80||(id!=='root'&&!names.includes(r.parents[id])))throw Error('관절 좌표 또는 연결이 올바르지 않습니다.');}
-  if(r.parents.root)throw Error('전체 기준의 부모는 지정할 수 없습니다.');boneOrder(r);
+  if(r.parents.root)throw Error('전체 기준의 부모는 지정할 수 없습니다.');boneOrder(r);validateControls(r);
   if(r.meshDensity!==undefined&&!['simple','balanced','fine'].includes(r.meshDensity))throw Error('메쉬 밀도를 확인해주세요.');
   if(r.partBones!==undefined){if(!r.partBones||typeof r.partBones!=='object'||Array.isArray(r.partBones))throw Error('파츠별 본 설정을 확인해주세요.');for(const [i,ids]of Object.entries(r.partBones))if(!/^\d+$/.test(i)||Number(i)>=s.layers.length||!Array.isArray(ids)||!ids.length||ids.length>names.length||ids.some(id=>!names.includes(id)))throw Error('파츠에 연결된 본을 확인해주세요.');}
   if(r.sleeves!==undefined){
