@@ -7,6 +7,7 @@ export const chainFor=id=>Object.keys(chainDefs).find(key=>chainDefs[key].includ
 export function validateControls(rig){
   const names=Object.keys(rig.points),validKeys=Object.keys(chainDefs),record=v=>v&&typeof v==='object'&&!Array.isArray(v);
   if(rig.activeBones!==undefined&&(!Array.isArray(rig.activeBones)||!rig.activeBones.includes('root')||!rig.activeBones.includes('body')||new Set(rig.activeBones).size!==rig.activeBones.length||rig.activeBones.some(id=>!names.includes(id)||id!=='root'&&!rig.activeBones.includes(rig.parents[id]))))throw Error('템플릿의 관절 범위가 올바르지 않습니다.');
+  if(rig.poseOffsets!==undefined&&(!record(rig.poseOffsets)||Object.entries(rig.poseOffsets).some(([id,p])=>!names.includes(id)||!record(p)||![p.x,p.y].every(v=>Number.isFinite(v)&&Math.abs(v)<=32768))))throw Error('얼굴 포즈 이동 값을 확인해주세요.');
   for(const key of ['ikModes','ikTargets','ikBends'])if(rig[key]!==undefined&&(!record(rig[key])||Object.keys(rig[key]).some(k=>!validKeys.includes(k))))throw Error('IK 설정이 올바르지 않습니다.');
   for(const mode of Object.values(rig.ikModes||{}))if(!['ik','fk'].includes(mode))throw Error('IK/FK 방식을 확인해주세요.');
   for(const p of Object.values(rig.ikTargets||{}))if(!record(p)||![p.x,p.y].every(v=>Number.isFinite(v)&&Math.abs(v)<=32768))throw Error('IK 목표 좌표를 확인해주세요.');

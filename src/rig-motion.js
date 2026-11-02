@@ -6,8 +6,10 @@ export const wrapAngle=v=>((v+180)%360+360)%360-180;
 export function motionWorld(rig){
   const {order,world:rest}=setupPose(rig),world={};
   for(const id of order){const b=rest[id],parent=rig.parents[id];if(!parent){world[id]={...b,angle:b.angle+(rig.pose?.[id]||0)};continue;}
+    const offset=rig.poseOffsets?.[id]||{x:0,y:0},pr=world[parent].angle*rad;
+    const ox=offset.x*Math.cos(pr)-offset.y*Math.sin(pr),oy=offset.x*Math.sin(pr)+offset.y*Math.cos(pr);
     const p=world[parent],r=(p.angle-rest[parent].angle)*rad,dx=b.x-rest[parent].x,dy=b.y-rest[parent].y;
-    world[id]={x:p.x+dx*Math.cos(r)-dy*Math.sin(r),y:p.y+dx*Math.sin(r)+dy*Math.cos(r),angle:p.angle+b.angle-rest[parent].angle+(rig.pose?.[id]||0)};
+    world[id]={x:p.x+dx*Math.cos(r)-dy*Math.sin(r)+ox,y:p.y+dx*Math.sin(r)+dy*Math.cos(r)+oy,angle:p.angle+b.angle-rest[parent].angle+(rig.pose?.[id]||0)};
   }return world;
 }
 export function motionPoints(rig){const world=motionWorld(rig),root=rig.points.root;return Object.fromEntries(activeIds(rig).map(id=>[id,{x:root.x+world[id].x,y:root.y-world[id].y}]));}
@@ -41,4 +43,11 @@ export function initializeControls(rig){
   rig.ikModes??={};for(const key of Object.keys(chainDefs))if(availableChain(rig,key)){
     rig.ikModes[key]??='fk';if(rig.ikModes[key]==='ik'&&!rig.ikTargets?.[key])setChainMode(rig,key,'ik');
   }return rig;
+}
+
+// Target is in canvas coordinates; store translation in the posed parent's local axes.
+export function moveFaceControl(rig,id,target){
+  if(!id.startsWith('face_')||!rig.points[id]||![target.x,target.y].every(Number.isFinite))return;
+  const w=motionWorld(rig),parent=w[rig.parents[id]],p=w[id],a=-parent.angle*rad,dx=target.x-rig.points.root.x-p.x,dy=rig.points.root.y-target.y-p.y;
+  rig.poseOffsets??={};const old=rig.poseOffsets[id]||{x:0,y:0};rig.poseOffsets[id]={x:old.x+dx*Math.cos(a)-dy*Math.sin(a),y:old.y+dx*Math.sin(a)+dy*Math.cos(a)};
 }

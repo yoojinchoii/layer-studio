@@ -1,5 +1,5 @@
 import {activeIds,chainDefs,chainLabels,chainFor,availableChain} from './rig-scope.js';
-import {motionPoints,setChainMode,solveChain,solvePinned,rotateJoint,wrapAngle} from './rig-motion.js';
+import {motionPoints,setChainMode,solveChain,solvePinned,rotateJoint,wrapAngle,moveFaceControl} from './rig-motion.js';
 import {templateKinds,applyBuiltin,applyRigTemplate,createRigTemplate,readTemplates,saveTemplate,templateStorageKey,validateTemplate} from './rig-templates.js';
 import {initSleeves} from './garment-parts.js';
 
@@ -9,11 +9,11 @@ export function installRigFeatures({getProject,isBusy,pixels,selected,poseMode,r
   let drag=null,templates=readTemplates(localStorage);
   const scale=()=>rig().width/Math.max(200,$('rigCanvas').getBoundingClientRect().width);
   function controlFields(){
-    const r=rig();if(!r)return;
+    const r=rig();if(!r)return;$('rigLimbControls').hidden=r.frame==='bust';$('rigFaceControls').hidden=r.frame!=='bust';$('rigAiJoints').disabled=r.frame==='bust';$('rigMode').options[1].textContent=r.frame==='bust'?'포즈 편집 · 얼굴 이동 / 회전':'포즈 편집 · 직접 회전 / IK 이동';
     for(const [key,id]of Object.entries(controls)){$(id).disabled=!availableChain(r,key);$(id).value=r.ikModes?.[key]||'fk';}
     const key=chainFor(selected()),ik=key&&availableChain(r,key)&&r.ikModes?.[key]==='ik';$('rigBendFlip').disabled=!ik||!poseMode();
     $('rigControlNote').textContent=ik?'손·발은 고정한 채 팔꿈치·무릎의 굽힘 방향을 바꿀 수 있어요. 각도를 직접 수정하면 해당 부위만 FK로 전환됩니다.':'회전은 자식 관절에도 전달됩니다. 회색 부위는 관절이 없거나 중간에 추가 본이 있어 2관절 IK를 사용할 수 없어요.';
-    $('rigGestureHint').textContent=poseMode()?'주황 손잡이: 회전 · 파란 사각점: IK 이동':'점을 끌어 이동 · 방향키 1px · Shift 10px';
+    $('rigGestureHint').textContent=poseMode()?(r.frame==='bust'?'얼굴 점: 포즈 이동 · 주황 손잡이: 회전':'주황 손잡이: 회전 · 파란 사각점: IK 이동'):'점을 끌어 이동 · 방향키 1px · Shift 10px';
   }
   for(const [key,id]of Object.entries(controls))$(id).onchange=()=>{
     if(!rig()||isBusy())return;stop();remember();if(!setChainMode(rig(),key,$(id).value))return;
@@ -32,12 +32,12 @@ export function installRigFeatures({getProject,isBusy,pixels,selected,poseMode,r
     const r=rig();if(!r||!poseMode()||isBusy())return false;stop();const points=motionPoints(r),p=points[selected()],s=scale();
     const handle=p&&Math.hypot(pos.x-p.x-32*s,pos.y-p.y)<11*s;
     if(!handle&&!nearest)return false;const id=handle?selected():nearest;selectJoint(id,true);const key=chainFor(id),ik=!handle&&key&&r.ikModes?.[key]==='ik'&&chainDefs[key][2]===id;
-    const pivot=points[id];remember();drag={id,key,ik,pivot,startPose:r.pose[id]||0,angle:Math.hypot(pos.x-pivot.x,pos.y-pivot.y)>4*s?Math.atan2(pos.y-pivot.y,pos.x-pivot.x):null};
+    const pivot=points[id];remember();drag={id,key,ik,face:!handle&&id.startsWith('face_'),pointer:pos,pivot,startPose:r.pose[id]||0,angle:Math.hypot(pos.x-pivot.x,pos.y-pivot.y)>4*s?Math.atan2(pos.y-pivot.y,pos.x-pivot.x):null};
     $('rigCanvas').setPointerCapture(e.pointerId);$('rigCanvas').focus();e.preventDefault();return true;
   }
   function pointerMove(pos){
     if(!drag)return false;const r=rig();
-    if(drag.ik){solveChain(r,drag.key,pos);solvePinned(r);}else{
+    if(drag.face){moveFaceControl(r,drag.id,{x:drag.pivot.x+pos.x-drag.pointer.x,y:drag.pivot.y+pos.y-drag.pointer.y});}else if(drag.ik){solveChain(r,drag.key,pos);solvePinned(r);}else{
       const a=Math.atan2(pos.y-drag.pivot.y,pos.x-drag.pivot.x);if(Math.hypot(pos.x-drag.pivot.x,pos.y-drag.pivot.y)<4*scale())return true;
       if(drag.angle===null){drag.angle=a;return true;}
       rotateJoint(r,drag.id,wrapAngle(drag.startPose-(a-drag.angle)*180/Math.PI));
@@ -54,9 +54,9 @@ export function installRigFeatures({getProject,isBusy,pixels,selected,poseMode,r
   $('rigTemplateSelect').onchange=()=>{$('rigTemplateDelete').disabled=!$('rigTemplateSelect').value.startsWith('custom:');};
   $('rigTemplateApply').onclick=()=>{
     if(!rig()||isBusy())return;try{stop();const value=$('rigTemplateSelect').value,layers=sourceLayers(),result=value.startsWith('custom:')?applyRigTemplate(templates[Number(value.slice(7))],layers,rig().width,rig().height):applyBuiltin(value,layers,rig().width,rig().height);
-      initSleeves(layers,result.rig);for(const [key,mode]of Object.entries(result.rig.ikModes))if(mode==='ik')setChainMode(result.rig,key,'ik');
+      if(result.rig.frame!=='bust')initSleeves(layers,result.rig);for(const [key,mode]of Object.entries(result.rig.ikModes))if(mode==='ik')setChainMode(result.rig,key,'ik');
       remember();getProject().rig=result.rig;dirty();$('rigMode').value='setup';menus('head');draw();
-      report(`${activeIds(result.rig).length-1}개 관절 · 파츠 ${result.matched}개 연결 · 메쉬·가중치 재계산 완료.${result.unmatched.length?` 자동 연결을 확인할 항목: ${result.unmatched.join(', ')}`:' 관절 위치를 확인하고 필요한 점만 옮겨주세요.'}`);
+      report(`${result.rig.frame==='bust'?'얼굴 전용 리깅 · 분리된 눈·입 파츠만 개별 제어합니다. ':''}${activeIds(result.rig).length-1}개 관절 · 파츠 ${result.matched}개 연결 · 메쉬·가중치 재계산 완료.${result.unmatched.length?` 자동 연결을 확인할 항목: ${result.unmatched.join(', ')}`:' 관절 위치를 확인하고 필요한 점만 옮겨주세요.'}`);
     }catch(e){report(e.message);}
   };
   const currentTemplate=()=>createRigTemplate(rig(),getProject().meta,$('rigTemplateName').value||'내 리깅');

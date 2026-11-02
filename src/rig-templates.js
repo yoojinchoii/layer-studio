@@ -1,6 +1,7 @@
+import {configureFace} from './face-rig.js';
 import {inferRig,refineRig,boneOrder,boneLabels} from './rig-core.js';
 import {activeIds,chainDefs,availableChain,validateControls} from './rig-scope.js';
-export const templateKinds={full:'전신',half:'반신',bust:'흉상'};
+export const templateKinds={full:'전신',half:'반신',bust:'흉상 · 얼굴 전용'};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),copy=v=>JSON.parse(JSON.stringify(v));
 const key=name=>name.trim().toLowerCase().replace(/[ _-]+/g,'_');
 function bounds(layers,width,height){const list=layers.filter(l=>l.visible!==false);if(!list.length)return {x:0,y:0,width,height};const x=Math.min(...list.map(l=>l.x)),y=Math.min(...list.map(l=>l.y));return {x,y,width:Math.max(1,Math.max(...list.map(l=>l.x+l.width))-x),height:Math.max(1,Math.max(...list.map(l=>l.y+l.height))-y)};}
@@ -33,7 +34,7 @@ export function applyBuiltin(kind,layers,width,height){
   if(!templateKinds[kind])throw Error('템플릿 종류를 확인해주세요.');
   const rig=inferRig(layers,width,height);fitPartial(rig,layers,kind);refineRig(rig,layers);
   if(kind==='bust')fitPartial(rig,layers,kind);
-  rig.frame=kind;rig.activeBones=scopedBones(rig,layers,kind);rig.pose={};rig.ikModes=Object.fromEntries(Object.keys(chainDefs).filter(key=>availableChain(rig,key)).map(key=>[key,'fk']));rig.ikTargets={};rig.ikBends={};
+  rig.frame=kind;rig.activeBones=scopedBones(rig,layers,kind);if(kind==='bust')configureFace(rig,layers);rig.pose={};rig.ikModes=Object.fromEntries(Object.keys(chainDefs).filter(key=>availableChain(rig,key)).map(key=>[key,'fk']));rig.ikTargets={};rig.ikBends={};
   // No remote AI or old mesh transfer: every derived mesh uses the destination pixels.
   return {rig,matched:layers.length,unmatched:[]};
 }
@@ -53,7 +54,7 @@ export function createRigTemplate(rig,layers,name){
     weightBlend:copy(rig.weightBlend||{}),meshDensity:rig.meshDensity||'balanced',limbStyle:rig.limbStyle||'mesh',ikModes:copy(rig.ikModes||{})};
   validateTemplate(result);return result;
 }
-const modes=['rigid','torso','neck','bottoms','sleeve_left','sleeve_right','arm_left','arm_right','legs','feet','leg_left','leg_right','foot_left','foot_right'];
+const modes=['face','rigid','torso','neck','bottoms','sleeve_left','sleeve_right','arm_left','arm_right','legs','feet','leg_left','leg_right','foot_left','foot_right'];
 export function validateTemplate(t){
   const record=v=>v&&typeof v==='object'&&!Array.isArray(v),num=v=>Number.isFinite(v)&&Math.abs(v)<=100;
   if(!record(t)||t.format!=='layer-studio-template-v1'||typeof t.name!=='string'||!t.name.trim()||t.name.length>80||!templateKinds[t.frame]||!record(t.joints)||!Array.isArray(t.rules)||t.rules.length>100)throw Error('올바른 리깅 템플릿 파일이 아닙니다.');
