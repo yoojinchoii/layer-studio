@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {repairNeckGap} from './neck-gap.js';
+import {repairNeckGap,restoreNeckFromReference} from './neck-gap.js';
 const layer=(name,x,y,width,height,shape,color)=>{const data=new Uint8ClampedArray(width*height*4);for(let yy=0;yy<height;yy++)for(let xx=0;xx<width;xx++)if(shape(xx,yy))data.set([...color,255],(yy*width+xx)*4);return {name,x,y,width,height,data};};
 const fixture=()=>[
   layer('neck',30,10,20,30,(x,y)=>y<25,[240,190,155]),
@@ -25,4 +25,15 @@ test('does not recolor the opaque collar; underpaints its antialiased inner edge
   const [n,s]=fixture(),k=(14*50+25)*4;s.data.set([30,130,140,100],k);
   assert.ok(repairNeckGap([n,s],80,80)>0);assert.equal(s.data[k+3],255);
   assert.ok(s.data[k]>100);assert.deepEqual([...s.data.slice((15*50+25)*4,(15*50+25)*4+4)],[30,130,140,255]);
+});
+test('restores a large open collar from connected original skin, expands the crop, leaves clothing and exterior unchanged',()=>{
+ const neck=layer('neck',30,10,20,15,()=>true,[240,190,155]),shirt=layer('topwear',10,40,60,35,(x,y)=>y>18||x<10||x>50,[30,130,140]);
+ const ref=layer('original',0,0,80,80,(x,y)=>x>=20&&x<60&&y>=10&&y<60,[240,190,155]);
+ for(let y=25;y<60;y++)for(let x=20;x<60;x++)ref.data[(y*80+x)*4+1]=180+y%12;
+ const before=shirt.data.slice(),ls=[neck,shirt];assert.ok(restoreNeckFromReference(ls,80,80,ref)>800);
+ assert.ok(neck.height>40);assert.ok(neck.x<30);
+ for(let y=25;y<59;y++)for(let x=25;x<55;x++){const k=((y-neck.y)*neck.width+x-neck.x)*4;assert.deepEqual(neck.data.slice(k,k+4),ref.data.slice((y*80+x)*4,(y*80+x)*4+4));}
+ assert.deepEqual(shirt.data,before);assert.equal(restoreNeckFromReference(ls,80,80,ref),0);
+ for(let y=0;y<neck.height;y++)for(let x=0;x<neck.width;x++)if(neck.data[(y*neck.width+x)*4+3])assert.ok(ref.data[((y+neck.y)*80+x+neck.x)*4+3]>0);
+ assert.equal(restoreNeckFromReference(ls,80,80,null),0);assert.equal(restoreNeckFromReference(ls,80,80,{...ref,width:70}),0);
 });

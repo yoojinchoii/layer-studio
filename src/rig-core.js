@@ -1,4 +1,4 @@
-import {faceLabels,faceCandidates,faceWeights} from './face-rig.js';
+import {faceLabels,faceCandidates,faceWeights,splitFaceLids,facialOffsets} from './face-rig.js';
 import {activeIds,activeBone,chainDefs,availableChain} from './rig-scope.js';
 import {separateSleeve} from './garment-parts.js';
 import {silhouetteTopology} from './mesh-topology.js';
@@ -246,9 +246,9 @@ const slug=s=>String(s).replace(/[^\p{L}\p{N}_-]+/gu,'_').replace(/^_+|_+$/g,'')
 export function buildParts(layers,rig){
   const cutout=(rig.limbStyle??'cutout')==='cutout',parts=[],used=new Map();
   layers.forEach((original,i)=>{
-    const separated=separateSleeve(original,rig,i);
+    const facial=rig.frame==='bust'?splitFaceLids(original,rig):null,separated=facial||separateSleeve(original,rig,i);
     for(const l of separated||[original]){
-      const mode=l.role==='sleeve'?l.mode:rig.modes[i],bone=l.role==='sleeve'?l.bone:rig.assignments[i];
+      const mode=facial||l.role==='sleeve'?l.mode:rig.modes[i],bone=facial||l.role==='sleeve'?l.bone:rig.assignments[i];
       const garment=mode==='face'||mode==='bottoms'||mode==='torso'||mode==='neck'||mode.startsWith('sleeve_'),split=cutout&&!garment&&mode!=='rigid'?splitLimb(l,rig,mode):null;
       const sides=!cutout&&(mode==='legs'||mode==='feet')&&l.data?splitMeshSides(l,rig,mode):null;
       if(sides?.length)parts.push(...sides.map(p=>({...p,source:i})));
@@ -300,7 +300,7 @@ function meshChain(rig,mode,x,y){
 const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
 export function partBoneCandidates(rig,index,mode=rig.modes[index],bone=rig.assignments[index]){return [...new Set(rawBoneCandidates(rig,index,mode,bone).map(id=>activeBone(rig,id)))];}
 function rawBoneCandidates(rig,index,mode=rig.modes[index],bone=rig.assignments[index]){
-  if(mode==='face')return faceCandidates(rig,bone);
+  if(mode==='face')return faceCandidates(rig,bone,index);
   if(mode==='rigid')return [bone];
   if(mode==='torso'||mode==='neck'){const names=spineGuide({},rig,mode).names;return mode==='torso'?[...names,...['arm_left','arm_right'].filter(id=>rig.points[id])]:names;}
   if(mode==='bottoms')return [...new Set(['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?meshChain(rig,mode,h.x,h.y):[];}))];
@@ -406,7 +406,7 @@ export function buildMesh(layer,rig,mode,bone,setup){
   const guide=weightGuide(layer,rig,mode,bone,layer.x+layer.width/2,layer.y+layer.height/2);
   if(mode==='torso')for(const side of ['left','right']){const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`];const d=A&&E&&unit(E.x-A.x,E.y-A.y);if(d)guide.joints=[...guide.joints,{id:`arm_${side}`,p:A,dir:d,band:Math.hypot(E.x-A.x,E.y-A.y)*.2}];}
   if(mode==='bottoms')guide.joints=['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?weightGuide(layer,rig,mode,bone,h.x,h.y).joints:[];});
-  const extra=mode==='face'?faceCandidates(rig,bone).flatMap(id=>{const p=rig.points[id],r=Math.min(layer.width,layer.height)*.12;return [[p.x-layer.x,p.y-layer.y],...[[r,0],[-r,0],[0,r],[0,-r]].map(([dx,dy])=>[p.x-layer.x+dx,p.y-layer.y+dy])];}):mode==='bottoms'?crotchPoints(layer,rig):[];
+  const extra=mode==='face'?faceCandidates(rig,bone).flatMap(id=>{const p=rig.points[id],r=Math.min(layer.width,layer.height)*(/eye|brow|mouth|nose/.test(id)?.06:.12);return [[p.x-layer.x,p.y-layer.y],...[[r,0],[-r,0],[0,r],[0,-r]].map(([dx,dy])=>[p.x-layer.x+dx,p.y-layer.y+dy])];}):mode==='bottoms'?crotchPoints(layer,rig):[];
   const topology=silhouetteTopology(layer,guide.joints,rig.meshDensity,extra);
   const xs=meshAxis(layer.width,layer.x,guide.joints,'x'),ys=meshAxis(layer.height,layer.y,guide.joints,'y');
   const nx=xs.length-1,ny=ys.length-1,grid=[],lookup=new Map(),root=rig.points.root;
@@ -479,7 +479,7 @@ export function makeSkeleton(parts,rig,amplitude=1){
   }
   const ikNames=ik.map(c=>c.name),animations=templateAnimations(rig,ikNames,amplitude),manual={};
   for(const [id,value]of Object.entries(rig.pose||{}))if(active.has(id))manual[spineName(id)]={rotate:[{value}]};
-  for(const [id,p]of Object.entries(rig.poseOffsets||{}))if(active.has(id))(manual[spineName(id)]??={}).translate=[{x:p.x,y:p.y}];
+  for(const [id,p]of Object.entries(facialOffsets(rig)))if(active.has(id))(manual[spineName(id)]??={}).translate=[{x:p.x,y:p.y}];
   animations.manual_pose={bones:manual};if(ikNames.length)animations.manual_pose.ik=Object.fromEntries(ikNames.map(n=>[n,[{mix:0}]]));
   const skeleton={skeleton:{spine:'4.0.64',x:-rig.width/2,y:0,width:rig.width,height:rig.height,images:'./images/',fps:30},bones,slots};
   if(ik.length)skeleton.ik=ik;

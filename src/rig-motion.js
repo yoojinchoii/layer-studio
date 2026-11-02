@@ -1,12 +1,13 @@
+import {facialOffsets} from './face-rig.js';
 import {setupPose} from './rig-core.js';
 import {activeIds,chainDefs,availableChain,chainFor} from './rig-scope.js';
 const rad=Math.PI/180,angle=(a,b)=>Math.atan2(b.y-a.y,b.x-a.x)/rad;
 export const wrapAngle=v=>((v+180)%360+360)%360-180;
 // Same FK evaluation as the export, without building textures, meshes or animations per pointer event.
 export function motionWorld(rig){
-  const {order,world:rest}=setupPose(rig),world={};
+  const {order,world:rest}=setupPose(rig),world={},offsets=facialOffsets(rig);
   for(const id of order){const b=rest[id],parent=rig.parents[id];if(!parent){world[id]={...b,angle:b.angle+(rig.pose?.[id]||0)};continue;}
-    const offset=rig.poseOffsets?.[id]||{x:0,y:0},pr=world[parent].angle*rad;
+    const offset=offsets[id]||{x:0,y:0},pr=world[parent].angle*rad;
     const ox=offset.x*Math.cos(pr)-offset.y*Math.sin(pr),oy=offset.x*Math.sin(pr)+offset.y*Math.cos(pr);
     const p=world[parent],r=(p.angle-rest[parent].angle)*rad,dx=b.x-rest[parent].x,dy=b.y-rest[parent].y;
     world[id]={x:p.x+dx*Math.cos(r)-dy*Math.sin(r)+ox,y:p.y+dx*Math.sin(r)+dy*Math.cos(r)+oy,angle:p.angle+b.angle-rest[parent].angle+(rig.pose?.[id]||0)};
@@ -35,6 +36,7 @@ export function solveChain(rig,key,target){
 }
 export function solvePinned(rig){for(const key of Object.keys(chainDefs))if(rig.ikModes?.[key]==='ik'&&rig.ikTargets?.[key])solveChain(rig,key,rig.ikTargets[key]);}
 export function rotateJoint(rig,id,value){
+  if(rig.faceRig>=2&&id.startsWith('face_')){if(!value)delete rig.pose[id];return;}
   const chain=chainFor(id);if(chain&&rig.ikModes?.[chain]==='ik')setChainMode(rig,chain,'fk');
   rig.pose??={};if(value)rig.pose[id]=wrapAngle(value);else delete rig.pose[id];solvePinned(rig);
 }

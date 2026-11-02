@@ -1,14 +1,14 @@
 import {applyBuiltin} from './rig-templates.js';
-import {detectFrame} from './face-rig.js';
+import {detectFrame,facialOffsets} from './face-rig.js';
 import {installRigFeatures} from './rig-feature-ui.js';
 import {activeIds,activeBone,validateControls} from './rig-scope.js';
-import {rotateJoint,setChainMode,initializeControls} from './rig-motion.js';
+import {rotateJoint,setChainMode,initializeControls,motionPoints,moveFaceControl} from './rig-motion.js';
 import {psdDocument} from './psd-document.js';
 import {auditRig} from './rig-audit.js';
 import {initSleeves,suggestSleeve,cuffLine} from './garment-parts.js';
 import {installSpinePreview} from './spine-preview.js';
 import {partBoneCandidates,cleanPixels,repairSeams,splitLegLayers,inferRig,refineRig,buildParts,applyPose,applyFill,hiddenMasks,matchOriginal,centerJoints,attachProps,makeSkeleton,poseMatrices,boneLabels,meshWorldVertices,vertexWeights,regionMatrix,mul,spineName,animationNames,addJoint,addJointAt,insertJointAt,upgradeRig,upgradeGarments,deleteJoint,setParent,boneOrder} from './rig-core.js';
-import {repairNeckGap} from './neck-gap.js';
+import {repairNeckGap,restoreNeckFromReference} from './neck-gap.js';
 import {packAtlas,encodePNG} from './spine-export.js';
 import {zipSync,strToU8} from 'fflate';
 import {writePsd} from 'ag-psd';
@@ -77,16 +77,19 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
       if(!same){const source=state.layers.map(l=>({...l})),meta=source.map(metadata),data=source.map((l,i)=>({...meta[i],data:pixels(l.canvas)})),frame=['full','half','bust'].includes(state.frameHint)?state.frameHint:detectFrame(data,state.width,state.height),rig=applyBuiltin(frame,data,state.width,state.height).rig;
         if(frame!=='bust')initSleeves(data,rig);$('rigTemplateSelect').value=frame;
         project={ids:state.layers.map(l=>l.id).join('|'),source,layers:source,rig,meta,removed:0};history=[];future=[];$('rigStrength').value='1';$('rigAmplitude').value='1';}
-      else{project.meta=state.layers.map(metadata);const ids=project.source.map(l=>l.id);project.source=state.layers.map(l=>({...l,canvas:project.source[ids.indexOf(l.id)]?.canvas||l.canvas}));project.layers=project.layers.map((l,i)=>({...l,...project.meta[i]}));}
-      initializeControls(project.rig);dirty();$('rigMode').value='setup';menus();if(options.show!==false&&!$('rigDialog').open)$('rigDialog').showModal();if(!same){message('경계를 정리하고 있어요…');await new Promise(r=>setTimeout(r,30));await cleanup();try{if(options.detect!==false)await detectJoints();}catch(e){message(`AI 관절 인식 실패 · 모양 기반 추정 사용 (${e.message})`);}}draw();return true;
+      else{const previous=project.meta,ids=project.source.map(l=>l.id);project.source=state.layers.map(l=>{const i=ids.indexOf(l.id),raw=project.source[i];return {...l,canvas:raw?.canvas||l.canvas,x:raw?raw.x+l.x-(previous[i]?.x??l.x):l.x,y:raw?raw.y+l.y-(previous[i]?.y??l.y):l.y};});project.meta=state.layers.map(metadata);project.layers=project.layers.map((l,i)=>({...l,...project.meta[i]}));}
+      initializeControls(project.rig);dirty();$('rigMode').value='setup';menus();if(options.show!==false&&!$('rigDialog').open)$('rigDialog').showModal();if(!same){message('경계를 정리하고 있어요…');await new Promise(r=>setTimeout(r,30));await cleanup();if(project.rig.frame==='bust'){project.rig=applyBuiltin('bust',project.layers.map((l,i)=>({...project.meta[i],data:pixels(l.canvas)})),state.width,state.height).rig;dirty();menus('head');}try{if(options.detect!==false)await detectJoints();}catch(e){message(`AI 관절 인식 실패 · 모양 기반 추정 사용 (${e.message})`);}}draw();return true;
     }catch(e){message(e.message);toast(e.message);return false;}
   }
   async function cleanup(){
     stop();processing=true;$('rigProjectOpen').disabled=true;const next=[];let removed=0;for(const id of ['rigClean','rigSave','rigApply','rigProjectSave','rigSpinePreview'])$(id).disabled=true;
     try{for(const l of project.source){const c=canvas(l.canvas.width,l.canvas.height),ctx=c.getContext('2d');ctx.drawImage(l.canvas,0,0);const pixels=ctx.getImageData(0,0,c.width,c.height),r=cleanPixels(pixels.data,c.width,c.height,Number($('rigStrength').value));pixels.data.set(r.data);ctx.putImageData(pixels,0,0);removed+=r.removed;next.push({...l,canvas:c});await new Promise(r=>setTimeout(r,0));}const ref=state.reference;if(ref&&ref.width===project.rig.width&&ref.height===project.rig.height){const datas=next.map(l=>{const ctx=l.canvas.getContext('2d');return {ctx,img:ctx.getImageData(0,0,l.canvas.width,l.canvas.height)};});matchOriginal(next.map((l,i)=>({...l,width:l.canvas.width,height:l.canvas.height,data:datas[i].img.data})),{width:ref.width,height:ref.height,data:ref.getContext('2d').getImageData(0,0,ref.width,ref.height).data});datas.forEach(d=>d.ctx.putImageData(d.img,0,0));}
     project.neckGapPixels=0;
-    if($('rigSeams').checked){const datas=next.map(l=>({ctx:l.canvas.getContext('2d'),img:l.canvas.getContext('2d').getImageData(0,0,l.canvas.width,l.canvas.height)})),layers=next.map((l,i)=>({...metadata(l),data:datas[i].img.data}));project.neckGapPixels=repairNeckGap(layers,project.rig.width,project.rig.height);project.seamPixels=repairSeams(layers,project.rig.width,project.rig.height);datas.forEach(d=>d.ctx.putImageData(d.img,0,0));}
-    project.layers=next;project.removed=removed;project.cleanVersion=(project.cleanVersion||0)+1;state.layers=next;state.view='composite';render();dirty();status();draw();}
+    if($('rigSeams').checked){const layers=next.map(l=>({...metadata(l),data:pixels(l.canvas)})),reference=ref?{width:ref.width,height:ref.height,data:pixels(ref)}:null;
+      project.neckGapPixels=restoreNeckFromReference(layers,project.rig.width,project.rig.height,reference)+repairNeckGap(layers,project.rig.width,project.rig.height);project.seamPixels=repairSeams(layers,project.rig.width,project.rig.height);
+      layers.forEach((l,i)=>{const c=canvas(l.width,l.height);c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(l.data),l.width,l.height),0,0);next[i]={...next[i],x:l.x,y:l.y,canvas:c};});project.meta=next.map(metadata);
+    }
+    project.meta=next.map(metadata);project.layers=next;project.removed=removed;project.cleanVersion=(project.cleanVersion||0)+1;state.layers=next;state.view='composite';render();dirty();status();draw();}
     finally{processing=false;$('rigProjectOpen').disabled=state.busy;for(const id of ['rigClean','rigSave','rigApply','rigProjectSave','rigSpinePreview'])$(id).disabled=false;}
   }
   // Spine parts derived from the cleaned layers and the current joints; rebuilt whenever either changes.
@@ -107,7 +110,7 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     dst.forEach(([x,y],i)=>{const len=Math.hypot(x-cx,y-cy)||1,xx=x+(x-cx)/len*.35,yy=y+(y-cy)/len*.35;i?ctx.lineTo(xx,yy):ctx.moveTo(xx,yy);});ctx.closePath();ctx.clip();ctx.transform(a,b,c,d,d0[0]-a*s0[0]-c*s0[1],d0[1]-b*s0[0]-d*s0[1]);ctx.drawImage(img,0,0);ctx.restore();
   }
   const spinePose=()=>Object.fromEntries(Object.entries(project.rig.pose||{}).map(([k,v])=>[spineName(k),v]));
-  function matrices(time=null){return poseMatrices(skeleton(),time,time===null&&poseMode()?spinePose():{},$('rigAnim').value,time===null&&poseMode()?Object.fromEntries(Object.entries(project.rig.poseOffsets||{}).map(([id,p])=>[spineName(id),p])):{});}
+  function matrices(time=null){return poseMatrices(skeleton(),time,time===null&&poseMode()?spinePose():{},$('rigAnim').value,time===null&&poseMode()?Object.fromEntries(Object.entries(facialOffsets(project.rig)).map(([id,p])=>[spineName(id),p])):{});}
   function jointPositions(time=null){const m=matrices(time),root=project.rig.points.root;return Object.fromEntries(Object.keys(project.rig.points).filter(id=>m[spineName(id)]).map(id=>{const q=m[spineName(id)];return [id,{x:root.x+q[4],y:root.y-q[5]}];}));}
   function draw(time=null){
     if(!project)return;fitPreview();const c=$('rigCanvas'),ctx=c.getContext('2d'),{width,height}=project.rig,root=project.rig.points.root;if(c.width!==width)c.width=width;if(c.height!==height)c.height=height;ctx.clearRect(0,0,width,height);
@@ -146,7 +149,7 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     if(!belongs(current)){const related=project.meta.findIndex((_,i)=>belongs(i));if(related>=0)$('rigLayer').value=String(related);}
     fields();binding();if(reveal){$('rigTabJoints').click();$('rigPanelJoints').parentElement.scrollTop=0;}
   }
-  function fields(){if(!project)return;const id=selected(),p=project.rig.points[id];updateWeightSelection();$('rigPoseReset').disabled=!project.rig.pose[id]&&!project.rig.poseOffsets?.[id];$('rigWeightBlend').value=project.rig.weightBlend?.[id]??1;$('rigWeightBlendValue').textContent=`${Number($('rigWeightBlend').value).toFixed(2)}배`;$('rigWeightBlend').disabled=project.rig.limbStyle!=='mesh'||! /^(elbow|wrist|knee|ankle|joint)_/.test(id);$('rigX').value=Math.round(p.x*10)/10;$('rigY').value=Math.round(p.y*10)/10;$('rigParent').value=project.rig.parents[id];$('rigAngle').value=project.rig.pose[id]||0;$('rigAngleInput').value=Math.round((project.rig.pose[id]||0)*10)/10;$('rigAngleValue').textContent=`${Math.round((project.rig.pose[id]||0)*10)/10}°`;$('rigDelete').disabled=!!boneLabels[id];$('rigUndo').disabled=!history.length;$('rigX').disabled=$('rigY').disabled=poseMode();$('rigAngle').disabled=$('rigAngleInput').disabled=$('rigAngleReset').disabled=!poseMode();features?.controlFields();draw();}
+  function fields(){if(!project)return;const id=selected(),p=project.rig.points[id];updateWeightSelection();$('rigPoseReset').disabled=!project.rig.pose[id]&&!project.rig.poseOffsets?.[id];$('rigWeightBlend').value=project.rig.weightBlend?.[id]??1;$('rigWeightBlendValue').textContent=`${Number($('rigWeightBlend').value).toFixed(2)}배`;$('rigWeightBlend').disabled=project.rig.limbStyle!=='mesh'||! /^(elbow|wrist|knee|ankle|joint)_/.test(id);$('rigX').value=Math.round(p.x*10)/10;$('rigY').value=Math.round(p.y*10)/10;$('rigParent').value=project.rig.parents[id];$('rigAngle').value=project.rig.pose[id]||0;$('rigAngleInput').value=Math.round((project.rig.pose[id]||0)*10)/10;$('rigAngleValue').textContent=`${Math.round((project.rig.pose[id]||0)*10)/10}°`;$('rigDelete').disabled=!!boneLabels[id];$('rigUndo').disabled=!history.length;$('rigX').disabled=$('rigY').disabled=poseMode();$('rigAngle').disabled=$('rigAngleInput').disabled=$('rigAngleReset').disabled=!poseMode()||(project.rig.faceRig>=2&&id.startsWith('face_'));features?.controlFields();draw();}
   function binding(){const i=Number($('rigLayer').value);sleeveFields();$('rigBind').value=activeBone(project.rig,project.rig.assignments[i]);$('rigDeform').value=project.rig.modes[i];influenceFields();draw();}
   function sleeveFields(){
     const i=Number($('rigLayer').value),isArm=/^arm_(left|right)$/.test(project.rig.modes[i]),cfg=project.rig.sleeves?.[i];
@@ -183,7 +186,7 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     remember();drag={id:selected(),dx:project.rig.points[selected()].x-pos.x,dy:project.rig.points[selected()].y-pos.y};$('rigCanvas').setPointerCapture(e.pointerId);$('rigCanvas').focus();e.preventDefault();};
   $('rigCanvas').onpointermove=e=>{const p=mouse(e);if(features.pointerMove(p))return;if(!drag)return;setPoint(p.x+drag.dx,p.y+drag.dy);};
   const endDrag=e=>{if(features.pointerEnd(e)){status();return;}if(!drag)return;drag=null;if($('rigCanvas').hasPointerCapture(e.pointerId))$('rigCanvas').releasePointerCapture(e.pointerId);status();};$('rigCanvas').onpointerup=endDrag;$('rigCanvas').onpointercancel=endDrag;
-  $('rigCanvas').onkeydown=e=>{if(!project||poseMode()||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();remember();const p=project.rig.points[selected()],step=e.shiftKey?10:1;setPoint(p.x+(e.key==='ArrowLeft'?-step:e.key==='ArrowRight'?step:0),p.y+(e.key==='ArrowUp'?-step:e.key==='ArrowDown'?step:0));};
+  $('rigCanvas').onkeydown=e=>{if(!project||processing||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)||poseMode()&&!selected().startsWith('face_'))return;e.preventDefault();remember();const p=poseMode()?motionPoints(project.rig)[selected()]:project.rig.points[selected()],step=e.shiftKey?10:1,x=p.x+(e.key==='ArrowLeft'?-step:e.key==='ArrowRight'?step:0),y=p.y+(e.key==='ArrowUp'?-step:e.key==='ArrowDown'?step:0);if(poseMode()){moveFaceControl(project.rig,selected(),{x,y});dirty();fields();}else setPoint(x,y);};
   $('rigX').onchange=$('rigY').onchange=()=>{remember();setPoint(Number($('rigX').value),Number($('rigY').value));};
   $('rigBone').onchange=()=>{stop();selectJoint(selected());};$('rigLayer').onchange=()=>{$('rigBone').value=activeBone(project.rig,project.rig.assignments[Number($('rigLayer').value)]);fields();binding();};
   $('rigBind').onchange=()=>{remember();project.rig.assignments[Number($('rigLayer').value)]=$('rigBind').value;project.rig.modes[Number($('rigLayer').value)]='rigid';if(project.rig.partBones)delete project.rig.partBones[Number($('rigLayer').value)];stop();dirty();binding();status();};
@@ -206,7 +209,7 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     e.preventDefault();(e.shiftKey?redo:undo)();
   });
   $('rigReinfer').onclick=()=>{if(!project)return;remember();const fresh=applyBuiltin(project.rig.frame||'full',project.layers.map((l,i)=>({...project.meta[i],data:pixels(l.canvas)})),project.rig.width,project.rig.height).rig;for(const id of Object.keys(fresh.points))if(boneLabels[id])project.rig.points[id]=fresh.points[id];dirty();fields();status();message('관절 위치를 파츠 모양에서 다시 추정했어요. 추가 관절과 연결 설정은 유지됩니다.');};
-  $('rigMode').onchange=()=>{stop();fields();message(poseMode()?(project.rig.frame==='bust'?'얼굴 점을 끌면 포즈가 움직여요. 주황 손잡이는 회전입니다. 이동·회전 모두 manual_pose로 저장합니다.':'주황 회전 손잡이를 끌거나 IK 손·발의 파란 사각점을 끌어보세요. 저장하면 manual_pose에 포함됩니다.'):'관절 점을 드래그하거나 X·Y를 입력하세요. 방향키 1px / Shift+방향키 10px.');};
+  $('rigMode').onchange=()=>{stop();fields();message(poseMode()?(project.rig.frame==='bust'?'얼굴 점은 드래그·방향키로 이동합니다. 머리·목은 주황 손잡이로 회전합니다. 편집 포즈는 manual_pose로 저장합니다.':'주황 회전 손잡이를 끌거나 IK 손·발의 파란 사각점을 끌어보세요. 저장하면 manual_pose에 포함됩니다.'):'관절 점을 드래그하거나 X·Y를 입력하세요. 방향키 1px / Shift+방향키 10px.');};
   let angleHistory=false;$('rigAngle').oninput=()=>{stop();if(!angleHistory){remember();angleHistory=true;}rotateJoint(project.rig,selected(),Number($('rigAngle').value));features.controlFields();$('rigPoseReset').disabled=!project.rig.pose[selected()]&&!project.rig.poseOffsets?.[selected()];$('rigAngleValue').textContent=`${$('rigAngle').value}°`;$('rigAngleInput').value=$('rigAngle').value;dirty();draw();};$('rigAngle').onchange=()=>angleHistory=false;
   const setAngle=v=>{if(!Number.isFinite(v))return;stop();remember();v=Math.max(-180,Math.min(180,Math.round(v*10)/10));rotateJoint(project.rig,selected(),v);dirty();fields();};
   $('rigAngleInput').onchange=()=>setAngle(Number($('rigAngleInput').value));$('rigAngleInput').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();setAngle(Number($('rigAngleInput').value));}};
@@ -283,7 +286,8 @@ Spine에서는 해당 IK의 Mix가 1일 때 빨간 ik_ 뼈대를 움직이고, 0
   $('rigAnim').replaceChildren(...Object.entries(animationNames).map(([k,v])=>new Option(v,k)));
   spinePreview=installSpinePreview({download,canSend:()=>!!project&&!processing&&!state.busy,snapshot:()=>({name:state.name,projectId:project.syncId??=crypto.randomUUID(),skeleton:skeleton(),parts:parts()})});
   $('rigDialog').addEventListener('close',()=>spinePreview.update());
-  features=installRigFeatures({getProject:()=>project,isBusy:()=>processing||state.busy,pixels,selected,poseMode,remember,dirty,fields,menus,draw,stop,message,selectJoint,download});
+  features=installRigFeatures({getProject:()=>project,isBusy:()=>processing||state.busy,pixels,selected,poseMode,remember,dirty,fields,menus,draw,stop,message,selectJoint,download,beforeFace:cleanup});
+  $('rigFaceRebuild').onclick=async()=>{if(processing||state.busy)return;$('rigSeams').checked=true;await features.applyTemplate('bust');};
   $('autoRigBtn').onclick=()=>prepare({detect:false});return {prepare,snapshot:snapshotProject,restore:restoreProject,exportLayers:()=>currentProject()?parts():null,isProcessing:()=>processing,repair:async()=>{await prepare({detect:false});if(!project)return;$('rigSeams').checked=true;await cleanup();$('rigDialog').close();toast(`접합선 ${project.seamPixels||0}픽셀 정리 · 목 빈틈 ${project.neckGapPixels||0}픽셀 보완. 레이어 PSD·PNG에도 반영됩니다.`);},update:()=>{$('autoRigBtn').disabled=state.busy||state.layers.length<2;$('rigProjectOpen').disabled=state.busy;spinePreview.update();}};
 }
 export function validateProject(s){
