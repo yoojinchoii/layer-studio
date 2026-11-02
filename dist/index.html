@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=half-face-8">
+<link rel="stylesheet" href="/style.css?v=pose-review-9">
 </head>
 <body>
 <header class="topbar">
@@ -17,7 +17,7 @@
     <span class="chip" id="fileTag">준비</span>
   </div>
   <div class="header-actions">
-    <span class="chip" id="appVersion">상반신·얼굴 8</span>
+    <span class="chip" id="appVersion">자세·파츠 보정 9</span>
     <button class="button ghost" id="helpBtn"><i data-lucide="circle-help"></i><span>사용 가이드</span></button>
     <button class="button ghost connection-btn" id="connectionBtn"><i data-lucide="plug-zap"></i><span>서버 연결</span></button>
   </div>
@@ -276,6 +276,13 @@
       </div>
       <div class="rig-inspector">
         <section id="rigPanelJoints" role="tabpanel" aria-labelledby="rigTabJoints">
+          <div class="card" id="rigPoseReview" hidden>
+            <h3>자세·파츠 확인</h3>
+            <ul id="rigPoseIssues" class="field-note"></ul>
+            <button id="rigRepairBindings" class="button primary full">겹친 팔·머리장식 연결 보정</button>
+            <button id="rigEnableFull" class="button outlined full">얼굴 유지 · 전신 관절 켜기</button>
+            <p class="field-note">AI 사용 없음 · 연결 보정은 되돌리기로 취소할 수 있어요. 겹친 팔을 개별로 움직이려면 PSD에서 양팔을 분리하고 가려진 부분을 그려 넣어주세요. 각 팔을 handwear_R / handwear_L로 이름 붙이면 화면의 위치와 관계없이 연결합니다.</p>
+          </div>
           <div class="card">
             <h3>선택한 관절</h3>
             <select id="rigBone" aria-label="선택한 관절"></select>
@@ -306,6 +313,9 @@
           </div>
           <div class="card" id="rigLimbControls">
             <h3>팔·다리 조작 방식</h3>
+            <button id="rigArmGuide" class="button outlined full">선택한 팔 · 어깨→팔꿈치→손목 맞추기</button>
+            <button id="rigArmGuideCancel" class="button subtle full" hidden>3점 맞추기 취소</button>
+            <p class="field-note">한쪽 팔이 따로 분리되어 있을 때 사용합니다. 비스듬하거나 굽힌 팔도 세 관절을 각각 클릭해 맞출 수 있어요.</p>
             <p class="field-note">IK는 손·발의 사각점을 끌고, FK는 선택한 관절의 회전 손잡이를 끌어요. 전환해도 현재 포즈를 유지합니다.</p>
             <label class="field-label" for="rigControlArmLeft">오른팔 · 화면 왼쪽</label><select id="rigControlArmLeft"><option value="fk">FK · 관절별 회전</option><option value="ik">IK · 손 위치 고정</option></select>
             <label class="field-label" for="rigControlArmRight">왼팔 · 화면 오른쪽</label><select id="rigControlArmRight"><option value="fk">FK · 관절별 회전</option><option value="ik">IK · 손 위치 고정</option></select>
@@ -367,7 +377,7 @@
             <select id="rigBind" aria-label="연결할 뼈대"></select>
             <label class="field-label" for="rigDeform">변형 방식</label>
             <select id="rigDeform">
-              <option value="rigid">한 관절에 고정</option><option value="face">얼굴 · 해당 파츠의 얼굴 제어점</option>
+              <option value="crossed_arms">겹친 양팔 · 가슴에 고정 (개별 분리 필요)</option><option value="rigid">한 관절에 고정</option><option value="face">얼굴 · 해당 파츠의 얼굴 제어점</option>
               <option value="arm_left">화면 왼쪽 팔 · 상완/전완/손</option>
               <option value="arm_right">화면 오른쪽 팔 · 상완/전완/손</option>
               <option value="torso">상의 · 허리 + 가슴 + 소매 따라 휘어짐</option>
@@ -489,6 +499,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=half-face-8"></script>
+<script type="module" src="/app.js?v=pose-review-9"></script>
 </body>
 </html>

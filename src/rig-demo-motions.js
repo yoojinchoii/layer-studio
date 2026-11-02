@@ -1,4 +1,4 @@
-import {activeIds,availableChain} from './rig-scope.js';
+import {activeIds,availableChain,independentArm} from './rig-scope.js';
 
 export const animationNames={head_sway:'머리·목 기울이기',face_gaze:'눈동자·시선 이동',face_expression:'눈썹·눈꺼풀·입 점검',upper_sway:'상체 흔들기·호흡',upper_gesture:'양팔·어깨 점검',idle:'대기 (idle)',wave:'손 흔들기 (wave)',cheer:'환호 (cheer)',hop:'가볍게 점프 (hop)'};
 export const animationDescriptions={
@@ -10,7 +10,7 @@ export const animationDescriptions={
   idle:'작은 호흡과 흔들림을 반복합니다.',wave:'손을 흔들어 어깨·팔꿈치·손목의 연결을 확인합니다.',cheer:'양팔을 들어 올리는 동작입니다.',hop:'무릎을 굽혔다가 가볍게 뛰는 동작입니다.'
 };
 export function availableAnimations(rig){
-  const ids=new Set(activeIds(rig)),has=id=>ids.has(id),upper=rig.frame!=='bust',arms=['left','right'].some(s=>has(`arm_${s}`));
+  const ids=new Set(activeIds(rig)),has=id=>ids.has(id),upper=rig.frame!=='bust',arms=['left','right'].some(s=>has(`arm_${s}`)&&independentArm(rig,s));
   const enabled={head_sway:has('head'),face_gaze:['left','right'].some(s=>has(`face_pupil_${s}`)),face_expression:[...ids].some(id=>/^face_(brow|lid_|mouth)/.test(id)),upper_sway:upper&&has('chest'),upper_gesture:upper&&arms,idle:true,wave:upper&&availableChain(rig,'arm_right'),cheer:upper&&arms,hop:upper&&availableChain(rig,'leg_left')&&availableChain(rig,'leg_right')};
   return Object.keys(animationNames).filter(key=>enabled[key]);
 }

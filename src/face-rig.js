@@ -1,3 +1,4 @@
+import {isHeadAccessory} from './part-identity.js';
 // FaceRig reference: separate head/face controls, local sprite influences, sparse facial meshes.
 export const faceLabels={face_root:'얼굴 전체',face_left:'오른 볼 (화면 왼쪽)',face_right:'왼 볼 (화면 오른쪽)',face_nose:'코',face_jaw:'턱',face_mouth:'입',face_eye_left:'오른 눈 (화면 왼쪽)',face_eye_right:'왼 눈 (화면 오른쪽)',face_brow_left:'오른 눈썹 (화면 왼쪽)',face_brow_right:'왼 눈썹 (화면 오른쪽)',face_pupil_left:'오른 눈동자 (화면 왼쪽)',face_pupil_right:'왼 눈동자 (화면 오른쪽)'};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -55,7 +56,8 @@ export function configureFace(rig,layers){
   rig.activeBones=[...active];rig.faceRig=2;rig.faceGeometry={face,eyes:eyeBoxes};rig.pose={};rig.poseOffsets={};rig.sleeves={};rig.partBones={};rig.faceBindings={};
   rig.assignments=layers.map((l,i)=>{
     const b=pixelBounds(l)||l,n=l.name,kind=facePartKind(n),which=side(b);let bone='chest',mode='rigid',allowed=null;
-    if(/hair|머리카락/i.test(n)){bone=/back|뒤|뒷/i.test(n)?'face_hair_back':'face_hair_front';mode='face';}
+    if(isHeadAccessory(n)){bone='head';allowed=['head'];}
+    else if(/hair|머리카락/i.test(n)){bone=/back|뒤|뒷/i.test(n)?'face_hair_back':'face_hair_front';mode='face';}
     else if(/^(neck|목)(?:$|[_ -])/i.test(n)){bone='neck';mode='neck';allowed=['chest','neck','head'];}
     else if(/^(face|얼굴)(?:$|[_ -])/i.test(n)){bone='face_root';mode='face';}
     else if(kind){bone=kind==='nose'||kind==='mouth'?`face_${kind}`:`face_${kind==='lids'?'lid_upper':kind}_${which}`;mode='face';}
@@ -77,7 +79,7 @@ export function faceCandidates(rig,bone,index){
 // Add facial controls to a half-body rig without replacing the torso, arms, IK or poses.
 // Called once for legacy projects; later loads retain hand-edited facial points and bindings.
 export function extendHalfFace(rig,layers){
-  if(rig.frame!=='half'||rig.faceRig>=2||!layers.some(l=>/^(face|얼굴)(?:$|[_ -])/i.test(l.name)))return false;
+  if(!['half','full'].includes(rig.frame)||rig.faceRig>=2||!layers.some(l=>/^(face|얼굴)(?:$|[_ -])/i.test(l.name)))return false;
   const face=configureFace(JSON.parse(JSON.stringify(rig)),layers),ids=Object.keys(faceLabels);
   if(new Set([...Object.keys(rig.points),...ids]).size>64)return false;
   const active=rig.activeBones||Object.keys(rig.points);

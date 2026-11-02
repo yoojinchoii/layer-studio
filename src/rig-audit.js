@@ -4,7 +4,7 @@ export function auditRig(parts,rig,sk){
   const rest=poseMatrices(sk),poseIds=sk.bones.map(b=>b.name).filter(n=>/^(upper_arm|forearm|shin)_[RL]$/.test(n));
   const poses=poseIds.flatMap(id=>[-60,60].map(angle=>poseMatrices(sk,null,{[id]:angle})));
   const area=(v,t,k)=>{const [a,b,c]=t.slice(k,k+3).map(i=>v[i]);return (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);};
-  for(const p of parts){if(p.visible===false)continue;
+  for(const p of parts){if(p.visible===false)continue;if(rig.modes[p.source]==='crossed_arms')add(p.name,'양팔이 한 파츠입니다. 현재 가슴에 고정되어 있으며 개별 팔 모션에는 좌우 분리·가려진 그림 복원이 필요합니다.');
     if(p.data&&!p.data.some((v,i)=>i%4===3&&v>8)){add(p.name,'보이는 픽셀이 없는 빈 파츠');continue;}
     if(/topwear|sleeve|상의|소매/i.test(p.name)&&/arm|elbow|wrist/.test(p.bone))add(p.name,'의상이 팔 본에 연결되어 함께 움직입니다.');
     const a=sk.skins[0].attachments[p.slot]?.[p.slot];if(a?.type!=='mesh')continue;

@@ -1,5 +1,6 @@
+import {namedSide,isArmPart,isHeadAccessory,mergedArmRoots} from './part-identity.js';
 import {faceLabels,faceCandidates,faceWeights,splitFaceLids,facialOffsets} from './face-rig.js';
-import {activeIds,activeBone,chainDefs,availableChain} from './rig-scope.js';
+import {activeIds,activeBone,chainDefs,availableChain,independentArm} from './rig-scope.js';
 import {separateSleeve} from './garment-parts.js';
 import {silhouetteTopology} from './mesh-topology.js';
 import {availableAnimations,demoMotionSpecs} from './rig-demo-motions.js';
@@ -61,7 +62,7 @@ export function inferRig(layers,width,height){
   const body={x:pants?center(pants):cx,y:pants?pants.y+8:height*.48};
   const points={root:{x:width/2,y:height},body,upper:{x:body.x,y:body.y-height*.015},pelvis:{x:body.x,y:body.y+height*.015},chest:{x:cx,y:shoulderY+height*.06},neck:{x:cx,y:shirt?shirt.y:height*.2},head:{x:cx,y:face?face.y+face.height*.8:height*.16},hair:{x:cx,y:face?face.y+face.height*.18:height*.08}};
   for(const side of ['left','right']){
-    const sign=side==='left'?-1:1,arm=layers.find(l=>/handwear|^arm|팔/.test(l.name.toLowerCase())&&(center(l)<cx)===(side==='left'));
+    const sign=side==='left'?-1:1,arm=layers.find(l=>isArmPart(l.name)&&(namedSide(l.name)||((center(l)<cx)?'left':'right'))===side);
     const shoulder={x:arm?arm.x+arm.width*(side==='left'?.83:.17):cx+sign*width*.09,y:arm?arm.y+arm.height*.08:shoulderY};
     const wrist={x:arm?arm.x+arm.width*(side==='left'?.13:.87):cx+sign*width*.2,y:arm?arm.y+arm.height*.79:height*.48};
     points[`arm_${side}`]=shoulder;points[`elbow_${side}`]={x:shoulder.x+(wrist.x-shoulder.x)*.51,y:shoulder.y+(wrist.y-shoulder.y)*.51};points[`wrist_${side}`]=wrist;
@@ -73,8 +74,9 @@ export function inferRig(layers,width,height){
   const assignments=layers.map(l=>{const n=l.name.toLowerCase(),part=n.match(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_([rl])(?:_\d+)?$/);
     if(part)return `${partBones[part[1]]}_${part[2]==='r'?'left':'right'}`;
     const lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'hip':'ankle'}_${lower[2]==='r'?'left':'right'}`;
-    if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'arm_left':'arm_right';if(/topwear|상의/.test(n))return 'chest';if(/handwear|^arm|팔/.test(n))return center(l)<cx?'arm_left':'arm_right';if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
+    if(isHeadAccessory(n))return 'head';if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'arm_left':'arm_right';if(/topwear|상의/.test(n))return 'chest';if(isArmPart(n))return `arm_${namedSide(n)||(center(l)<cx?'left':'right')}`;if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
   const modes=layers.map((l,i)=>{const n=l.name.toLowerCase(),lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'leg':'foot'}_${lower[2]==='r'?'left':'right'}`;if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'sleeve_left':'sleeve_right';if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';if(/bottomwear|하의|skirt|치마/.test(n))return 'bottoms';if(/topwear|상의/.test(n)&&assignments[i]==='chest')return 'torso';if(/^(neck|목)$/.test(n))return 'neck';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
+  layers.forEach((l,i)=>{const roots=mergedArmRoots(l,layers);if(!roots)return;assignments[i]='chest';modes[i]='crossed_arms';points.arm_left=roots.left;points.arm_right=roots.right;});
   return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,garments:2,limbStyle:'mesh',weightBlend:{},partBones:{},meshDensity:'balanced',ik:true};
 }
 // Pixel statistics for opaque pixels of a layer, in image coordinates (pixel centres).
@@ -251,11 +253,11 @@ export function buildParts(layers,rig){
   const separatedLayers=layers.map((l,i)=>facialLayers[i]||separateSleeve(l,rig,i)||[l]);
   // A shirt torso must not be weighted as an integrated sleeve when that sleeve is
   // already supplied by a separate sprite (including sleeves extracted from arm layers).
-  const detachedSleeves=[...new Set(separatedLayers.flatMap((ls,i)=>ls.map(l=>l.mode||rig.modes[i]).filter(m=>/^sleeve_(left|right)$/.test(m)).map(m=>m.slice(7))))];
+  const detachedSleeves=[...new Set([...['left','right'].filter(side=>!independentArm(rig,side)),...separatedLayers.flatMap((ls,i)=>ls.map(l=>l.mode||rig.modes[i]).filter(m=>/^sleeve_(left|right)$/.test(m)).map(m=>m.slice(7)))])];
   layers.forEach((original,i)=>{
     const facial=!!facialLayers[i];
     for(const l of separatedLayers[i]){
-      const mode=facial||l.role==='sleeve'?l.mode:rig.modes[i],bone=facial||l.role==='sleeve'?l.bone:rig.assignments[i];
+      const mode=rig.modes[i]==='crossed_arms'?'rigid':facial||l.role==='sleeve'?l.mode:rig.modes[i],bone=rig.modes[i]==='crossed_arms'?'chest':facial||l.role==='sleeve'?l.bone:rig.assignments[i];
       const garment=mode==='face'||mode==='bottoms'||mode==='torso'||mode==='neck'||mode.startsWith('sleeve_'),split=cutout&&!garment&&mode!=='rigid'?splitLimb(l,rig,mode):null;
       const sides=!cutout&&(mode==='legs'||mode==='feet')&&l.data?splitMeshSides(l,rig,mode):null;
       if(sides?.length)parts.push(...sides.map(p=>({...p,source:i})));
@@ -440,7 +442,7 @@ function templateAnimations(rig,ikNames,amplitude){
   const P=rig.points,active=new Set(activeIds(rig)),s=rig.height/768,A=amplitude,sin=(p,k=1,ph=0)=>Math.sin((p*k+ph)*2*Math.PI),out={};
   const make=(duration,spec)=>{
     const frames=Math.max(1,Math.round(duration*15)),times=Array.from({length:frames+1},(_,i)=>i/frames),bones={};
-    for(const [id,tl]of Object.entries(spec)){if(!active.has(id))continue;const o={};
+    for(const [id,tl]of Object.entries(spec)){if(!active.has(id)||/^(arm|elbow|wrist)_(left|right)$/.test(id)&&!independentArm(rig,id.split('_').at(-1)))continue;const o={};
       if(tl.rotate)o.rotate=times.map(p=>({time:round(p*duration),value:round(tl.rotate(p))}));
       for(const key of ['translate','scale'])if(tl[key])o[key]=times.map(p=>{const [x,y]=tl[key](p);return {time:round(p*duration),x:round(x),y:round(y)};});
       bones[spineName(id)]=o;}

@@ -55,7 +55,7 @@ export function createRigTemplate(rig,layers,name){
     weightBlend:copy(rig.weightBlend||{}),meshDensity:rig.meshDensity||'balanced',limbStyle:rig.limbStyle||'mesh',ikModes:copy(rig.ikModes||{})};
   validateTemplate(result);return result;
 }
-const modes=['face','rigid','torso','neck','bottoms','sleeve_left','sleeve_right','arm_left','arm_right','legs','feet','leg_left','leg_right','foot_left','foot_right'];
+const modes=['crossed_arms','face','rigid','torso','neck','bottoms','sleeve_left','sleeve_right','arm_left','arm_right','legs','feet','leg_left','leg_right','foot_left','foot_right'];
 export function validateTemplate(t){
   const record=v=>v&&typeof v==='object'&&!Array.isArray(v),num=v=>Number.isFinite(v)&&Math.abs(v)<=100;
   if(!record(t)||t.format!=='layer-studio-template-v1'||typeof t.name!=='string'||!t.name.trim()||t.name.length>80||!templateKinds[t.frame]||!record(t.joints)||!Array.isArray(t.rules)||t.rules.length>100)throw Error('올바른 리깅 템플릿 파일이 아닙니다.');
