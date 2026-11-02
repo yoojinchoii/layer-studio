@@ -2,6 +2,8 @@ import {faceLabels,faceCandidates,faceWeights,splitFaceLids,facialOffsets} from 
 import {activeIds,activeBone,chainDefs,availableChain} from './rig-scope.js';
 import {separateSleeve} from './garment-parts.js';
 import {silhouetteTopology} from './mesh-topology.js';
+import {availableAnimations,demoMotionSpecs} from './rig-demo-motions.js';
+export {animationNames,animationDescriptions,availableAnimations} from './rig-demo-motions.js';
 // Pure pixel/rig operations shared by the browser and artifact verification.
 const round=n=>Math.round(n*10000)/10000;
 const D2R=Math.PI/180;
@@ -428,12 +430,11 @@ export function vertexWeights(attachment,skeleton,boneName){
 }
 // Template motions are plain FK keys sampled at 15 fps; every IK constraint is keyed to mix 0 so the
 // result in Spine matches the browser preview. New animations made in Spine can use the IK as usual.
-export const animationNames={idle:'대기 (idle)',wave:'손 흔들기 (wave)',cheer:'환호 (cheer)',hop:'가볍게 점프 (hop)'};
 function templateAnimations(rig,ikNames,amplitude){
-  const P=rig.points,s=rig.height/768,A=amplitude,sin=(p,k=1,ph=0)=>Math.sin((p*k+ph)*2*Math.PI),out={};
+  const P=rig.points,active=new Set(activeIds(rig)),s=rig.height/768,A=amplitude,sin=(p,k=1,ph=0)=>Math.sin((p*k+ph)*2*Math.PI),out={};
   const make=(duration,spec)=>{
     const frames=Math.max(1,Math.round(duration*15)),times=Array.from({length:frames+1},(_,i)=>i/frames),bones={};
-    for(const [id,tl]of Object.entries(spec)){if(!P[id])continue;const o={};
+    for(const [id,tl]of Object.entries(spec)){if(!active.has(id))continue;const o={};
       if(tl.rotate)o.rotate=times.map(p=>({time:round(p*duration),value:round(tl.rotate(p))}));
       for(const key of ['translate','scale'])if(tl[key])o[key]=times.map(p=>{const [x,y]=tl[key](p);return {time:round(p*duration),x:round(x),y:round(y)};});
       bones[spineName(id)]=o;}
@@ -455,7 +456,8 @@ function templateAnimations(rig,ikNames,amplitude){
   out.hop=make(1,{body:{translate:p=>[0,-legLength*(1-Math.cos(theta*crouch(p)*D2R))+air(p)*16*s]},head:{rotate:p=>-crouch(p)*1.5},hair:{rotate:p=>air(p)*3-crouch(p)*1.5},
     ...each((side,o)=>({[`hip_${side}`]:{rotate:p=>o*theta*crouch(p)},[`knee_${side}`]:{rotate:p=>-o*2*theta*crouch(p)},[`ankle_${side}`]:{rotate:p=>o*theta*crouch(p)},
       [`arm_${side}`]:{rotate:p=>o*(14*air(p)-4*crouch(p))},[`elbow_${side}`]:{rotate:p=>o*6*air(p)}}))});
-  return out;
+  for(const [key,{duration,spec}]of Object.entries(demoMotionSpecs(rig,setupPose(rig).world,A)))out[key]=make(duration,spec);
+  return Object.fromEntries(availableAnimations(rig).map(key=>[key,out[key]]));
 }
 export function makeSkeleton(parts,rig,amplitude=1){
   const P=rig.points,root=P.root,setup=setupPose(rig),world=setup.world,active=new Set(activeIds(rig)),order=setup.order.filter(id=>active.has(id));setup.order=order;

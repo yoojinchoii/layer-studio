@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=position-5">
+<link rel="stylesheet" href="/style.css?v=motions-6">
 </head>
 <body>
 <header class="topbar">
@@ -17,7 +17,7 @@
     <span class="chip" id="fileTag">준비</span>
   </div>
   <div class="header-actions">
-    <span class="chip" id="appVersion">위치 슬라이더 5</span>
+    <span class="chip" id="appVersion">부위별 모션 6</span>
     <button class="button ghost" id="helpBtn"><i data-lucide="circle-help"></i><span>사용 가이드</span></button>
     <button class="button ghost connection-btn" id="connectionBtn"><i data-lucide="plug-zap"></i><span>서버 연결</span></button>
   </div>
@@ -256,6 +256,7 @@
           <button id="rigZoomFit" class="button subtle">맞춤</button>
         </div>
       </div>
+      <p id="rigMotionHint" class="rig-motion-note" aria-live="polite"></p>
       <div class="rig-preview checker"><canvas id="rigCanvas" tabindex="0" aria-label="관절 위치 편집 미리보기. 점을 드래그하거나 방향키로 이동"></canvas></div>
       <div class="rig-viewbar">
         <label class="check-chip"><input id="rigShowBones" type="checkbox" checked> 관절 표시</label>
@@ -443,7 +444,7 @@
               <select id="rigStrength"><option value="0">원래 경계 유지</option><option value="1" selected>약하게 · 권장</option><option value="2">조금 더 강하게</option></select>
               <button id="rigClean" class="button outlined">다시 보정</button>
             </div>
-            <label class="field-label" for="rigAmplitude">idle 움직임 크기</label>
+            <label class="field-label" for="rigAmplitude">대기·부위 점검 모션 강도</label>
             <input id="rigAmplitude" type="range" min="0" max="2" step="0.1" value="1">
           </div>
           <div class="card spine-bridge-panel">
@@ -488,6 +489,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=position-5"></script>
+<script type="module" src="/app.js?v=motions-6"></script>
 </body>
 </html>

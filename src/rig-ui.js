@@ -1,4 +1,5 @@
 import {applyBuiltin} from './rig-templates.js';
+import {availableAnimations,animationDescriptions} from './rig-demo-motions.js';
 import {detectFrame,facialOffsets} from './face-rig.js';
 import {installRigFeatures} from './rig-feature-ui.js';
 import {activeIds,activeBone,validateControls} from './rig-scope.js';
@@ -66,7 +67,8 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     $('rigParent').replaceChildren(new Option('전체 기준','root'),...opts());
     $('rigBind').replaceChildren(new Option('전체 기준','root'),...opts());
     $('rigLayer').replaceChildren(...project.meta.map((l,i)=>new Option(l.name,String(i))));
-    for(const o of $('rigAnim').options)o.disabled=project.rig.frame==='bust'&&!['idle','manual_pose'].includes(o.value);if($('rigAnim').selectedOptions[0]?.disabled)$('rigAnim').value='idle';
+    const frame=project.rig.frame||'full',old=$('rigAnim').value,names=availableAnimations(project.rig),preferred=frame==='bust'?'head_sway':frame==='half'?'upper_sway':'idle';
+    $('rigAnim').replaceChildren(...names.map(key=>new Option(animationNames[key],key)));$('rigAnim').value=$('rigAnim').dataset.frame===frame&&names.includes(old)?old:names.includes(preferred)?preferred:names[0];$('rigAnim').dataset.frame=frame;motionHint();
     $('rigMeshDensity').value=project.rig.meshDensity||'balanced';$('rigLimbStyle').value=project.rig.limbStyle??'cutout';$('rigIK').checked=project.rig.ik!==false;fields();binding();status();
   }
   async function prepare(options={}){
@@ -215,7 +217,8 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   $('rigShowMesh').onchange=$('rigShowWeights').onchange=()=>draw();
   let weightHistory=false;$('rigWeightBlend').oninput=()=>{if(!project)return;stop();if(!weightHistory){remember();weightHistory=true;}project.rig.weightBlend??={};project.rig.weightBlend[selected()]=Number($('rigWeightBlend').value);dirty();fields();influenceFields();status();};$('rigWeightBlend').onchange=()=>weightHistory=false;
   $('rigIK').onchange=()=>{remember();project.rig.ik=$('rigIK').checked;if(!project.rig.ik)for(const key of Object.keys(project.rig.ikModes||{}))setChainMode(project.rig,key,'fk');dirty();fields();};
-  $('rigAnim').onchange=()=>{if(playing){started=performance.now();}else draw();};
+  function motionHint(){$('rigMotionHint').textContent=`${animationDescriptions[$('rigAnim').value]||''} 재생은 저장한 포즈를 바꾸지 않아요 · AI 사용 없음.`;}
+  $('rigAnim').onchange=()=>{motionHint();if(playing){started=performance.now();}else draw();};
   $('rigParent').onchange=()=>{try{remember();setParent(project.rig,selected(),$('rigParent').value);dirty();menus();}catch(e){message(e.message);fields();}};
   $('rigAdd').onclick=()=>{if(!project)return;if($('rigMode').value!=='setup'){$('rigMode').value='setup';fields();}stop();placing=!placing;$('rigAdd').classList.toggle('primary',placing);const name=k=>project.rig.labels[k]||k,sel=selected();if(placing&&$('rigInsertMode').value==='between'&&sel==='root'){placing=false;$('rigAdd').classList.remove('primary');message('전체 기준 위에는 넣을 수 없어요.');return;}
     message(placing?($('rigInsertMode').value==='between'?`미리보기에서 위치를 클릭하세요. ${name(project.rig.parents[sel])} → [새 관절] → ${name(sel)} 순서로 들어갑니다. (다시 누르면 취소)`:`미리보기에서 새 관절 위치를 클릭하세요. ${name(sel)} 아래에 붙습니다. (다시 누르면 취소)`):'관절 추가를 취소했어요.');};
@@ -267,7 +270,9 @@ Spine > 데이터 가져오기 > spine/skeleton.json. 이미지 경로: ./images
 parts.psd: 잘린 파츠를 PSD로 저장한 파일. 원화 담당자가 관절 부분을 다듬은 뒤 다시 불러올 수 있습니다.
 
 [애니메이션]
-idle, wave, cheer, hop: 자동 생성된 FK 템플릿. 미리보기와 같게 하려고 이 동작들에서는 IK mix를 0으로 둡니다.
+${Object.keys(sk.animations).filter(k=>k!=='manual_pose').map(k=>`${k}: ${animationNames[k]||k}`).join('\n')}
+현재 구도와 관절에 맞춘 FK 예시 모션입니다. 미리보기와 같게 하려고 이 동작들에서는 IK mix를 0으로 둡니다.
+얼굴 점검은 기존 파츠의 이동·크기 변형입니다. 닫힌 눈이나 입 안 이미지를 새로 생성하지 않습니다.
 manual_pose: 웹에서 맞춘 포즈.
 manual_pose에는 웹에서 선택한 부위별 IK/FK와 목표 위치가 포함됩니다.
 Spine에서는 해당 IK의 Mix가 1일 때 빨간 ik_ 뼈대를 움직이고, 0일 때 개별 본을 회전하세요.
