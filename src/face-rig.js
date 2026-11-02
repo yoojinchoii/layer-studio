@@ -74,6 +74,21 @@ export function faceCandidates(rig,bone,index){
   if(bone==='face_left'||bone==='face_right')return available([bone,'face_root']);
   return [bone];
 }
+// Add facial controls to a half-body rig without replacing the torso, arms, IK or poses.
+// Called once for legacy projects; later loads retain hand-edited facial points and bindings.
+export function extendHalfFace(rig,layers){
+  if(rig.frame!=='half'||rig.faceRig>=2||!layers.some(l=>/^(face|얼굴)(?:$|[_ -])/i.test(l.name)))return false;
+  const face=configureFace(JSON.parse(JSON.stringify(rig)),layers),ids=Object.keys(faceLabels);
+  if(new Set([...Object.keys(rig.points),...ids]).size>64)return false;
+  const active=rig.activeBones||Object.keys(rig.points);
+  for(const id of ids){rig.points[id]={...face.points[id]};rig.parents[id]=face.parents[id];rig.labels[id]=face.labels[id];}
+  rig.activeBones=[...new Set([...active,...face.activeBones.filter(id=>id.startsWith('face_'))])];
+  rig.partBones??={};rig.faceBindings??={};
+  layers.forEach((l,i)=>{if(face.modes[i]!=='face')return;rig.assignments[i]=face.assignments[i];rig.modes[i]='face';rig.partBones[i]=[...face.partBones[i]];rig.faceBindings[i]=[...face.faceBindings[i]];});
+  // Keep the old hair pivot and its pose as the parent of the new front/back controls.
+  for(const id of ['face_hair_front','face_hair_back'])if(rig.activeBones.includes(id)&&active.includes('hair'))rig.parents[id]='hair';
+  rig.faceGeometry=face.faceGeometry;rig.faceRig=2;return true;
+}
 // Lossless split: each original lash pixel belongs to exactly one exported lid sprite.
 export function splitFaceLids(layer,rig){
   if(rig.faceRig<2||!layer.data)return null;

@@ -57,7 +57,7 @@ export function installRigFeatures({getProject,isBusy,pixels,selected,poseMode,r
     if(!rig()||isBusy())return;try{stop();if(value==='bust'||value.startsWith('custom:')&&templates[Number(value.slice(7))]?.frame==='bust')await beforeFace?.();const layers=sourceLayers(),result=value.startsWith('custom:')?applyRigTemplate(templates[Number(value.slice(7))],layers,rig().width,rig().height):applyBuiltin(value,layers,rig().width,rig().height);
       if(result.rig.frame!=='bust')initSleeves(layers,result.rig);for(const [key,mode]of Object.entries(result.rig.ikModes))if(mode==='ik')setChainMode(result.rig,key,'ik');
       remember();getProject().rig=result.rig;dirty();$('rigMode').value='setup';menus('head');draw();
-      report(`${result.rig.frame==='bust'?'얼굴 전용 리깅 · 분리된 눈·입 파츠만 개별 제어합니다. ':''}${activeIds(result.rig).length-1}개 관절 · 파츠 ${result.matched}개 연결 · 메쉬·가중치 재계산 완료.${result.unmatched.length?` 자동 연결을 확인할 항목: ${result.unmatched.join(', ')}`:' 관절 위치를 확인하고 필요한 점만 옮겨주세요.'}`);
+      report(`${result.rig.faceRig>=2?(result.rig.frame==='half'?'상반신 + 얼굴 리깅 · ':'얼굴 전용 리깅 · '):''}${activeIds(result.rig).length-1}개 관절 · 파츠 ${result.matched}개 연결 · 메쉬·가중치 재계산 완료.${result.unmatched.length?` 자동 연결을 확인할 항목: ${result.unmatched.join(', ')}`:' 관절 위치를 확인하고 필요한 점만 옮겨주세요.'}`);
     }catch(e){report(e.message);}
   };
   $('rigTemplateApply').onclick=()=>applyTemplate();
