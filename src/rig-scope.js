@@ -2,7 +2,7 @@ export const chainDefs={arm_left:['arm_left','elbow_left','wrist_left'],arm_righ
 export const chainLabels={arm_left:'오른팔 · 화면 왼쪽',arm_right:'왼팔 · 화면 오른쪽',leg_left:'오른다리 · 화면 왼쪽',leg_right:'왼다리 · 화면 오른쪽'};
 export const activeIds=rig=>Object.keys(rig.points).filter(id=>!rig.activeBones||rig.activeBones.includes(id));
 export function activeBone(rig,id){const active=new Set(activeIds(rig));for(let i=0;i<64;i++){if(active.has(id))return id;id=rig.parents[id];if(!id)break;}return 'root';}
-export function independentArm(rig,side){return !rig.modes?.includes('crossed_arms')||rig.modes.some((m,i)=>m!=='crossed_arms'&&([`arm_${side}`,`sleeve_${side}`].includes(m)||[`arm_${side}`,`elbow_${side}`,`wrist_${side}`].includes(rig.assignments[i])));}
+export function independentArm(rig,side){return rig.modes?.includes('split_arms')||!rig.modes?.includes('crossed_arms')||rig.modes.some((m,i)=>m!=='crossed_arms'&&([`arm_${side}`,`sleeve_${side}`].includes(m)||[`arm_${side}`,`elbow_${side}`,`wrist_${side}`].includes(rig.assignments[i])));}
 export function availableChain(rig,key){if(key.startsWith('arm_')&&!independentArm(rig,key.slice(4)))return false;const ids=chainDefs[key],active=new Set(activeIds(rig));return !!ids&&ids.every(id=>active.has(id))&&rig.parents[ids[1]]===ids[0]&&rig.parents[ids[2]]===ids[1]&&ids.slice(1).every((id,i)=>Math.hypot(rig.points[id].x-rig.points[ids[i]].x,rig.points[id].y-rig.points[ids[i]].y)>.01);}
 export const chainFor=id=>Object.keys(chainDefs).find(key=>chainDefs[key].includes(id));
 export function validateControls(rig){

@@ -1,3 +1,4 @@
+import {restoreArmChains} from './arm-separation.js';
 import {configureFace,extendHalfFace} from './face-rig.js';
 import {inferRig,refineRig,boneOrder,boneLabels} from './rig-core.js';
 import {activeIds,chainDefs,availableChain,validateControls} from './rig-scope.js';
@@ -35,7 +36,7 @@ export function applyBuiltin(kind,layers,width,height){
   const rig=inferRig(layers,width,height);fitPartial(rig,layers,kind);refineRig(rig,layers);
   if(kind==='bust')fitPartial(rig,layers,kind);
   rig.frame=kind;rig.activeBones=scopedBones(rig,layers,kind);if(kind==='bust')configureFace(rig,layers);rig.pose={};rig.ikModes=Object.fromEntries(Object.keys(chainDefs).filter(key=>availableChain(rig,key)).map(key=>[key,'fk']));rig.ikTargets={};rig.ikBends={};
-  extendHalfFace(rig,layers);
+  extendHalfFace(rig,layers);restoreArmChains(rig,layers);
   // No remote AI or old mesh transfer: every derived mesh uses the destination pixels.
   return {rig,matched:layers.length,unmatched:[]};
 }
@@ -55,7 +56,7 @@ export function createRigTemplate(rig,layers,name){
     weightBlend:copy(rig.weightBlend||{}),meshDensity:rig.meshDensity||'balanced',limbStyle:rig.limbStyle||'mesh',ikModes:copy(rig.ikModes||{})};
   validateTemplate(result);return result;
 }
-const modes=['crossed_arms','face','rigid','torso','neck','bottoms','sleeve_left','sleeve_right','arm_left','arm_right','legs','feet','leg_left','leg_right','foot_left','foot_right'];
+const modes=['split_arms','crossed_arms','face','rigid','torso','neck','bottoms','sleeve_left','sleeve_right','arm_left','arm_right','legs','feet','leg_left','leg_right','foot_left','foot_right'];
 export function validateTemplate(t){
   const record=v=>v&&typeof v==='object'&&!Array.isArray(v),num=v=>Number.isFinite(v)&&Math.abs(v)<=100;
   if(!record(t)||t.format!=='layer-studio-template-v1'||typeof t.name!=='string'||!t.name.trim()||t.name.length>80||!templateKinds[t.frame]||!record(t.joints)||!Array.isArray(t.rules)||t.rules.length>100)throw Error('올바른 리깅 템플릿 파일이 아닙니다.');
@@ -86,7 +87,7 @@ export function applyRigTemplate(template,layers,width,height){
   rig.weightBlend=copy(t.weightBlend);rig.meshDensity=t.meshDensity;rig.limbStyle=t.limbStyle;rig.ikModes=Object.fromEntries(Object.keys(chainDefs).filter(key=>availableChain(rig,key)).map(key=>[key,'fk']));
   for(const [key,mode]of Object.entries(t.ikModes||{}))if(availableChain(rig,key))rig.ikModes[key]=mode;
   if(t.frame==='half'&&!Object.keys(t.joints).some(id=>id.startsWith('face_'))){delete rig.faceRig;extendHalfFace(rig,layers);}
-  boneOrder(rig);validateControls(rig);return {rig,matched,unmatched:[...new Set(unmatched)]};
+  restoreArmChains(rig,layers);boneOrder(rig);validateControls(rig);return {rig,matched,unmatched:[...new Set(unmatched)]};
 }
 export const templateStorageKey='layer-studio-rig-templates-v1';
 export function readTemplates(storage){try{const list=JSON.parse(storage.getItem(templateStorageKey)||'[]');return Array.isArray(list)?list.slice(0,20).filter(t=>{try{validateTemplate(t);return true;}catch{return false;}}):[];}catch{return [];}}

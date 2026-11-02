@@ -1,3 +1,4 @@
+import {separateArms,restoreArmChains} from './arm-separation.js';
 import {namedSide,isArmPart,isHeadAccessory,mergedArmRoots} from './part-identity.js';
 import {faceLabels,faceCandidates,faceWeights,splitFaceLids,facialOffsets} from './face-rig.js';
 import {activeIds,activeBone,chainDefs,availableChain,independentArm} from './rig-scope.js';
@@ -77,7 +78,7 @@ export function inferRig(layers,width,height){
     if(isHeadAccessory(n))return 'head';if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'arm_left':'arm_right';if(/topwear|상의/.test(n))return 'chest';if(isArmPart(n))return `arm_${namedSide(n)||(center(l)<cx?'left':'right')}`;if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
   const modes=layers.map((l,i)=>{const n=l.name.toLowerCase(),lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'leg':'foot'}_${lower[2]==='r'?'left':'right'}`;if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'sleeve_left':'sleeve_right';if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';if(/bottomwear|하의|skirt|치마/.test(n))return 'bottoms';if(/topwear|상의/.test(n)&&assignments[i]==='chest')return 'torso';if(/^(neck|목)$/.test(n))return 'neck';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
   layers.forEach((l,i)=>{const roots=mergedArmRoots(l,layers);if(!roots)return;assignments[i]='chest';modes[i]='crossed_arms';points.arm_left=roots.left;points.arm_right=roots.right;});
-  return {points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,garments:2,limbStyle:'mesh',weightBlend:{},partBones:{},meshDensity:'balanced',ik:true};
+  const rig={points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,garments:2,limbStyle:'mesh',weightBlend:{},partBones:{},meshDensity:'balanced',ik:true};restoreArmChains(rig,layers,{refit:true});return rig;
 }
 // Pixel statistics for opaque pixels of a layer, in image coordinates (pixel centres).
 function opaquePoints(layer,keep=()=>true,stride=1){
@@ -250,14 +251,14 @@ const slug=s=>String(s).replace(/[^\p{L}\p{N}_-]+/gu,'_').replace(/^_+|_+$/g,'')
 export function buildParts(layers,rig){
   const cutout=(rig.limbStyle??'cutout')==='cutout',parts=[],used=new Map();
   const facialLayers=layers.map((l,i)=>rig.faceRig>=2&&rig.modes[i]==='face'?splitFaceLids(l,rig):null);
-  const separatedLayers=layers.map((l,i)=>facialLayers[i]||separateSleeve(l,rig,i)||[l]);
+  const separatedLayers=layers.map((l,i)=>facialLayers[i]||separateArms(l,rig,i)||separateSleeve(l,rig,i)||[l]);
   // A shirt torso must not be weighted as an integrated sleeve when that sleeve is
   // already supplied by a separate sprite (including sleeves extracted from arm layers).
-  const detachedSleeves=[...new Set([...['left','right'].filter(side=>!independentArm(rig,side)),...separatedLayers.flatMap((ls,i)=>ls.map(l=>l.mode||rig.modes[i]).filter(m=>/^sleeve_(left|right)$/.test(m)).map(m=>m.slice(7)))])];
+  const detachedSleeves=[...new Set([...['left','right'].filter(side=>!independentArm(rig,side)||rig.modes.includes('split_arms')),...separatedLayers.flatMap((ls,i)=>ls.map(l=>l.mode||rig.modes[i]).filter(m=>/^sleeve_(left|right)$/.test(m)).map(m=>m.slice(7)))])];
   layers.forEach((original,i)=>{
     const facial=!!facialLayers[i];
     for(const l of separatedLayers[i]){
-      const mode=rig.modes[i]==='crossed_arms'?'rigid':facial||l.role==='sleeve'?l.mode:rig.modes[i],bone=rig.modes[i]==='crossed_arms'?'chest':facial||l.role==='sleeve'?l.bone:rig.assignments[i];
+      const mode=rig.modes[i]==='crossed_arms'?'rigid':facial||l.role==='sleeve'||l.role==='separated-arm'?l.mode:rig.modes[i],bone=rig.modes[i]==='crossed_arms'?'chest':facial||l.role==='sleeve'||l.role==='separated-arm'?l.bone:rig.assignments[i];
       const garment=mode==='face'||mode==='bottoms'||mode==='torso'||mode==='neck'||mode.startsWith('sleeve_'),split=cutout&&!garment&&mode!=='rigid'?splitLimb(l,rig,mode):null;
       const sides=!cutout&&(mode==='legs'||mode==='feet')&&l.data?splitMeshSides(l,rig,mode):null;
       if(sides?.length)parts.push(...sides.map(p=>({...p,source:i})));
@@ -310,7 +311,7 @@ const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
 export function partBoneCandidates(rig,index,mode=rig.modes[index],bone=rig.assignments[index]){return [...new Set(rawBoneCandidates(rig,index,mode,bone).map(id=>activeBone(rig,id)))];}
 function rawBoneCandidates(rig,index,mode=rig.modes[index],bone=rig.assignments[index]){
   if(mode==='face')return faceCandidates(rig,bone,index);
-  if(mode==='rigid')return [bone];
+  if(mode==='rigid'||mode==='crossed_arms')return [bone];if(mode==='split_arms')return ['left','right'].flatMap(side=>['arm','elbow','wrist'].map(j=>`${j}_${side}`));
   if(mode==='torso'||mode==='neck'){const names=spineGuide({},rig,mode).names;return mode==='torso'?[...names,...['arm_left','arm_right'].filter(id=>rig.points[id])]:names;}
   if(mode==='bottoms')return [...new Set(['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?meshChain(rig,mode,h.x,h.y):[];}))];
   const p=rig.points[bone]||{x:0,y:0};return [...new Set(meshChain(rig,mode,p.x,p.y))];
@@ -336,7 +337,7 @@ function weightGuide(layer,rig,mode,bone,x,y){
     // Shoulder / hip: most of the blend sits on the torso side, so the limb itself still rotates fully.
     joints.push({id:names[i],p,dir,band,shift:limbRoot?-band*.5:0});
   }
-  const requested=rig.partBones?.[layer.source],allowed=Array.isArray(requested)?names.filter(n=>requested.includes(n)):names;
+  const requested=layer.allowedBones||rig.partBones?.[layer.source],allowed=Array.isArray(requested)?names.filter(n=>requested.includes(n)):names;
   return {names,joints,allowed:allowed.length?allowed:names,points};
 }
 // Shirts and necks bend along the spine: lower body → waist → chest (→ neck → head).
@@ -606,6 +607,6 @@ export function splitLegLayers(layers,rig){
     if(sides?.length===2){changed=true;for(const p of sides){out.push({...p,id:l.id?`${l.id}_${p.mode.endsWith('_left')?'R':'L'}`:undefined,sourceIndex:i});assignments.push(p.bone);modes.push(p.mode);}}
     else {out.push({...l,sourceIndex:i});assignments.push(rig.assignments[i]);modes.push(mode);}
   });
-  if(changed){if(rig.sleeves)rig.sleeves=Object.fromEntries(out.flatMap((l,i)=>rig.sleeves[l.sourceIndex]?[[i,rig.sleeves[l.sourceIndex]]]:[]));const previous=rig.partBones||{};rig.partBones=Object.fromEntries(out.flatMap((l,i)=>previous[l.sourceIndex]?[[i,[...previous[l.sourceIndex]]]]:[]));rig.assignments=assignments;rig.modes=modes;}
+  if(changed){if(rig.sleeves)rig.sleeves=Object.fromEntries(out.flatMap((l,i)=>rig.sleeves[l.sourceIndex]?[[i,rig.sleeves[l.sourceIndex]]]:[]));if(rig.armSplits)rig.armSplits=Object.fromEntries(out.flatMap((l,i)=>rig.armSplits[l.sourceIndex]?[[i,rig.armSplits[l.sourceIndex]]]:[]));const previous=rig.partBones||{};rig.partBones=Object.fromEntries(out.flatMap((l,i)=>previous[l.sourceIndex]?[[i,[...previous[l.sourceIndex]]]]:[]));rig.assignments=assignments;rig.modes=modes;}
   return {layers:out,changed};
 }
