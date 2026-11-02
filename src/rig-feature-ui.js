@@ -3,11 +3,11 @@ import {motionWorld,motionPoints,setChainMode,solveChain,solvePinned,rotateJoint
 import {templateKinds,applyBuiltin,applyRigTemplate,createRigTemplate,readTemplates,saveTemplate,templateStorageKey,validateTemplate} from './rig-templates.js';
 import {initSleeves} from './garment-parts.js';
 
-export function installRigFeatures({getProject,isBusy,pixels,selected,poseMode,remember,dirty,fields,menus,draw,stop,message,selectJoint,download,beforeFace}){
+export function installRigFeatures({getProject,isBusy,pixels,selected,poseMode,remember,dirty,fields,menus,draw,stop,message,selectJoint,download,beforeFace,viewScale}){
   const $=id=>document.getElementById(id),rig=()=>getProject()?.rig;
   const controls={arm_left:'rigControlArmLeft',arm_right:'rigControlArmRight',leg_left:'rigControlLegLeft',leg_right:'rigControlLegRight'};
   let drag=null,templates=readTemplates(localStorage);
-  const scale=()=>rig().width/Math.max(200,$('rigCanvas').getBoundingClientRect().width);
+  const scale=viewScale;
   function controlFields(){
     const r=rig();if(!r)return;$('rigLimbControls').hidden=r.frame==='bust';$('rigFaceControls').hidden=r.frame!=='bust';$('rigAiJoints').disabled=r.frame==='bust';$('rigMode').options[1].textContent='포즈 편집 · 위치 / 회전 / 크기';
     for(const [key,id]of Object.entries(controls)){$(id).disabled=!availableChain(r,key);$(id).value=r.ikModes?.[key]||'fk';}

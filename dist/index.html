@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=motions-6">
+<link rel="stylesheet" href="/style.css?v=viewport-7">
 </head>
 <body>
 <header class="topbar">
@@ -17,7 +17,7 @@
     <span class="chip" id="fileTag">준비</span>
   </div>
   <div class="header-actions">
-    <span class="chip" id="appVersion">부위별 모션 6</span>
+    <span class="chip" id="appVersion">화면·의상 보정 7</span>
     <button class="button ghost" id="helpBtn"><i data-lucide="circle-help"></i><span>사용 가이드</span></button>
     <button class="button ghost connection-btn" id="connectionBtn"><i data-lucide="plug-zap"></i><span>서버 연결</span></button>
   </div>
@@ -253,7 +253,7 @@
           <button id="rigZoomOut" class="icon-button" aria-label="리깅 미리보기 축소">−</button>
           <output id="rigZoomValue">100%</output>
           <button id="rigZoomIn" class="icon-button" aria-label="리깅 미리보기 확대">+</button>
-          <button id="rigZoomFit" class="button subtle">맞춤</button>
+          <button id="rigZoomFit" class="button subtle" title="움직인 파츠까지 모두 보이게 맞춥니다">전체 맞춤</button>
         </div>
       </div>
       <p id="rigMotionHint" class="rig-motion-note" aria-live="polite"></p>
@@ -489,6 +489,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=motions-6"></script>
+<script type="module" src="/app.js?v=viewport-7"></script>
 </body>
 </html>

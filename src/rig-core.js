@@ -247,15 +247,19 @@ const slug=s=>String(s).replace(/[^\p{L}\p{N}_-]+/gu,'_').replace(/^_+|_+$/g,'')
 // Layers (front-to-back, with RGBA data) become Spine parts: limbs are cut at joints in cutout style.
 export function buildParts(layers,rig){
   const cutout=(rig.limbStyle??'cutout')==='cutout',parts=[],used=new Map();
+  const separatedLayers=layers.map((l,i)=>(rig.frame==='bust'?splitFaceLids(l,rig):null)||separateSleeve(l,rig,i)||[l]);
+  // A shirt torso must not be weighted as an integrated sleeve when that sleeve is
+  // already supplied by a separate sprite (including sleeves extracted from arm layers).
+  const detachedSleeves=[...new Set(separatedLayers.flatMap((ls,i)=>ls.map(l=>l.mode||rig.modes[i]).filter(m=>/^sleeve_(left|right)$/.test(m)).map(m=>m.slice(7))))];
   layers.forEach((original,i)=>{
-    const facial=rig.frame==='bust'?splitFaceLids(original,rig):null,separated=facial||separateSleeve(original,rig,i);
-    for(const l of separated||[original]){
+    const facial=rig.frame==='bust'&&separatedLayers[i][0]!==original;
+    for(const l of separatedLayers[i]){
       const mode=facial||l.role==='sleeve'?l.mode:rig.modes[i],bone=facial||l.role==='sleeve'?l.bone:rig.assignments[i];
       const garment=mode==='face'||mode==='bottoms'||mode==='torso'||mode==='neck'||mode.startsWith('sleeve_'),split=cutout&&!garment&&mode!=='rigid'?splitLimb(l,rig,mode):null;
       const sides=!cutout&&(mode==='legs'||mode==='feet')&&l.data?splitMeshSides(l,rig,mode):null;
       if(sides?.length)parts.push(...sides.map(p=>({...p,source:i})));
       else if(split?.length)parts.push(...split.map(p=>({...p,source:i})));
-      else parts.push({...l,source:i,bone,mode:cutout&&!garment?'rigid':mode});
+      else parts.push({...l,source:i,bone,mode:cutout&&!garment?'rigid':mode,...(mode==='torso'?{detachedSleeves}: {})});
     }
   });
   for(const p of parts){p.bone=activeBone(rig,p.bone);const base=slug(p.name),n=(used.get(base)||0)+1;used.set(base,n);p.slot=n>1?`${base}_${n}`:base;}
@@ -350,9 +354,10 @@ function spineGuide(layer,rig,mode){
   return {names:valid,joints,allowed:allowed.length?allowed:valid,points:valid.map(id=>P[id])};
 }
 // Sleeves painted into the shirt follow the upper arm; the armpit side stays on the torso.
-function shirtArm(rig,x,y){
+function shirtArm(rig,x,y,detachedSleeves=[]){
   let best=null;
   for(const side of ['left','right']){
+    if(detachedSleeves.includes(side))continue;
     const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`],C=rig.points.chest;if(!A||!E||!C)continue;
     const len=Math.hypot(E.x-A.x,E.y-A.y);if(len<4)continue;const d={x:(E.x-A.x)/len,y:(E.y-A.y)/len};let o={x:-d.y,y:d.x};if(o.x*(A.x-C.x)+o.y*(A.y-C.y)<0)o={x:-o.x,y:-o.y};
     const r=len*.2,blend=clamp(Number(rig.weightBlend?.[`arm_${side}`])||1,.35,2),t=(x-A.x)*d.x+(y-A.y)*d.y,u=(x-A.x)*o.x+(y-A.y)*o.y;
@@ -361,8 +366,8 @@ function shirtArm(rig,x,y){
   }
   return best;
 }
-function shirtWeights(guide,weights,x,y,rig){
-  const arm=shirtArm(rig,x,y);if(!arm||guide.allowed&&!guide.allowed.includes(arm[0]))return weights;
+function shirtWeights(guide,weights,x,y,rig,detachedSleeves){
+  const arm=shirtArm(rig,x,y,detachedSleeves);if(!arm||guide.allowed&&!guide.allowed.includes(arm[0]))return weights;
   const main=weights.reduce((a,b)=>b[1]>a[1]?b:a);return [[main[0],1-arm[1]],arm].filter(([,w])=>w>=.005);
 }
 function guideWeights(guide,x,y){
@@ -406,7 +411,7 @@ function meshAxis(size,offset,joints,key){
 }
 export function buildMesh(layer,rig,mode,bone,setup){
   const guide=weightGuide(layer,rig,mode,bone,layer.x+layer.width/2,layer.y+layer.height/2);
-  if(mode==='torso')for(const side of ['left','right']){const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`];const d=A&&E&&unit(E.x-A.x,E.y-A.y);if(d)guide.joints=[...guide.joints,{id:`arm_${side}`,p:A,dir:d,band:Math.hypot(E.x-A.x,E.y-A.y)*.2}];}
+  if(mode==='torso')for(const side of ['left','right']){if(layer.detachedSleeves?.includes(side))continue;const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`];const d=A&&E&&unit(E.x-A.x,E.y-A.y);if(d)guide.joints=[...guide.joints,{id:`arm_${side}`,p:A,dir:d,band:Math.hypot(E.x-A.x,E.y-A.y)*.2}];}
   if(mode==='bottoms')guide.joints=['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?weightGuide(layer,rig,mode,bone,h.x,h.y).joints:[];});
   const extra=mode==='face'?faceCandidates(rig,bone).flatMap(id=>{const p=rig.points[id],r=Math.min(layer.width,layer.height)*(/eye|brow|mouth|nose/.test(id)?.06:.12);return [[p.x-layer.x,p.y-layer.y],...[[r,0],[-r,0],[0,r],[0,-r]].map(([dx,dy])=>[p.x-layer.x+dx,p.y-layer.y+dy])];}):mode==='bottoms'?crotchPoints(layer,rig):[];
   const topology=silhouetteTopology(layer,guide.joints,rig.meshDensity,extra);
@@ -419,7 +424,7 @@ export function buildMesh(layer,rig,mode,bone,setup){
   if(topology)hull=topology.hull;
   for(const [lx0,ly0]of coords){const x=layer.x+lx0,y=layer.y+ly0;uvs.push(lx0/layer.width,ly0/layer.height);
     const g=mode==='bottoms'||mode==='legs'||mode==='feet'?weightGuide(layer,rig,mode,bone,x,y):guide;
-    const weights=mode==='face'?faceWeights(layer,rig,bone,x,y):mode==='bottoms'?crotchWeights(rig,g,guideWeights(g,x,y),x):mode==='torso'?shirtWeights(g,guideWeights({...g,joints:g.joints.filter(j=>!/^arm_/.test(j.id))},x,y),x,y,rig):guideWeights(g,x,y);const bound=new Map();for(const [id,w]of weights){const b=activeBone(rig,id);bound.set(b,(bound.get(b)||0)+w);}vertices.push(bound.size);
+    const weights=mode==='face'?faceWeights(layer,rig,bone,x,y):mode==='bottoms'?crotchWeights(rig,g,guideWeights(g,x,y),x):mode==='torso'?shirtWeights(g,guideWeights({...g,joints:g.joints.filter(j=>!/^arm_/.test(j.id))},x,y),x,y,rig,layer.detachedSleeves):guideWeights(g,x,y);const bound=new Map();for(const [id,w]of weights){const b=activeBone(rig,id);bound.set(b,(bound.get(b)||0)+w);}vertices.push(bound.size);
     for(const [b,w]of bound){const [lx,ly]=toLocal(setup.world,b,x-root.x,root.y-y);vertices.push(setup.order.indexOf(b),round(lx),round(ly),w);}}
   if(!topology)for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){const a=lookup.get(`${x},${y}`),b=lookup.get(`${x+1},${y}`),c=lookup.get(`${x},${y+1}`),d=lookup.get(`${x+1},${y+1}`);triangles.push(a,c,b,b,c,d);}
   const pairs=new Set(),edges=[];for(let i=0;i<triangles.length;i+=3)for(const [a,b]of [[triangles[i],triangles[i+1]],[triangles[i+1],triangles[i+2]],[triangles[i+2],triangles[i]]]){const key=`${Math.min(a,b)},${Math.max(a,b)}`;if(!pairs.has(key)){pairs.add(key);edges.push(a*2,b*2);}}

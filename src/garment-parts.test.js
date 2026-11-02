@@ -10,6 +10,18 @@ function fixture(alpha=255){
 }
 function rgba(part,x,y){if(x<part.x||y<part.y||x>=part.x+part.width||y>=part.y+part.height)return [0,0,0,0];return Array.from(part.data.slice(((y-part.y)*part.width+x-part.x)*4,((y-part.y)*part.width+x-part.x)*4+4));}
 function over(a,b){const aa=a[3]/255,ba=b[3]/255,alpha=aa+ba*(1-aa);return [...a.slice(0,3).map((v,i)=>alpha?(v*aa+b[i]*ba*(1-aa))/alpha:0),alpha*255];}
+test('a detached sleeve cannot pull torso vertices, including after a project reload',()=>{
+  const {layers,rig}=fixture();initSleeves(layers,rig);
+  // Place the shirt beside the shoulder, where the old integrated-sleeve heuristic assigns arm weights.
+  layers[0].x=60;rig.points.chest={x:120,y:90};
+  for(const r of [rig,JSON.parse(JSON.stringify(rig))]){
+    const parts=buildParts(layers,r),shirt=parts.find(p=>p.source===0),sleeve=parts.find(p=>p.role==='sleeve'),sk=makeSkeleton(parts,r),rest=poseMatrices(sk),posed=poseMatrices(sk,null,{upper_arm_R:65});
+    assert.deepEqual(shirt.detachedSleeves,['left']);
+    const a=sk.skins[0].attachments[shirt.slot][shirt.slot],b=sk.skins[0].attachments[sleeve.slot][sleeve.slot];
+    assert.deepEqual(meshWorldVertices(a,sk,posed),meshWorldVertices(a,sk,rest));
+    assert.notDeepEqual(meshWorldVertices(b,sk,posed),meshWorldVertices(b,sk,rest));
+  }
+});
 test('short sleeve follows the upper arm, blends into the torso at the shoulder, and skin keeps its own arm weights',()=>{
   const {layers,rig}=fixture();assert.equal(initSleeves(layers,rig),1);const original=layers[1].data.slice(),parts=buildParts(layers,rig),sleeve=parts.find(p=>p.role==='sleeve'),arm=parts.find(p=>p.role==='skin');
   assert.equal(parts.length,3);assert.equal(sleeve.bone,'arm_left');assert.equal(sleeve.mode,'sleeve_left');assert.equal(arm.mode,'arm_left');assert.deepEqual(layers[1].data,original);
