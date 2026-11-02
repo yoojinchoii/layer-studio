@@ -2,7 +2,7 @@ import {applyBuiltin} from './rig-templates.js';
 import {detectFrame,facialOffsets} from './face-rig.js';
 import {installRigFeatures} from './rig-feature-ui.js';
 import {activeIds,activeBone,validateControls} from './rig-scope.js';
-import {rotateJoint,setChainMode,initializeControls,motionPoints,moveFaceControl} from './rig-motion.js';
+import {rotateJoint,setChainMode,initializeControls,motionPoints,moveJoint,setJointOffset,setJointScale,resetJointPose} from './rig-motion.js';
 import {psdDocument} from './psd-document.js';
 import {auditRig} from './rig-audit.js';
 import {initSleeves,suggestSleeve,cuffLine} from './garment-parts.js';
@@ -111,7 +111,7 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     dst.forEach(([x,y],i)=>{const len=Math.hypot(x-cx,y-cy)||1,xx=x+(x-cx)/len*.35,yy=y+(y-cy)/len*.35;i?ctx.lineTo(xx,yy):ctx.moveTo(xx,yy);});ctx.closePath();ctx.clip();ctx.transform(a,b,c,d,d0[0]-a*s0[0]-c*s0[1],d0[1]-b*s0[0]-d*s0[1]);ctx.drawImage(img,0,0);ctx.restore();
   }
   const spinePose=()=>Object.fromEntries(Object.entries(project.rig.pose||{}).map(([k,v])=>[spineName(k),v]));
-  function matrices(time=null){return poseMatrices(skeleton(),time,time===null&&poseMode()?spinePose():{},$('rigAnim').value,time===null&&poseMode()?Object.fromEntries(Object.entries(facialOffsets(project.rig)).map(([id,p])=>[spineName(id),p])):{});}
+  function matrices(time=null){return poseMatrices(skeleton(),time,time===null&&poseMode()?spinePose():{},$('rigAnim').value,time===null&&poseMode()?Object.fromEntries(Object.entries(facialOffsets(project.rig)).map(([id,p])=>[spineName(id),p])):{},time===null&&poseMode()?Object.fromEntries(Object.entries(project.rig.poseScales||{}).map(([id,p])=>[spineName(id),p])):{});}
   function jointPositions(time=null){const m=matrices(time),root=project.rig.points.root;return Object.fromEntries(Object.keys(project.rig.points).filter(id=>m[spineName(id)]).map(id=>{const q=m[spineName(id)];return [id,{x:root.x+q[4],y:root.y-q[5]}];}));}
   function draw(time=null){
     if(!project)return;fitPreview();const c=$('rigCanvas'),ctx=c.getContext('2d'),{width,height}=project.rig,root=project.rig.points.root;if(c.width!==width)c.width=width;if(c.height!==height)c.height=height;ctx.clearRect(0,0,width,height);
@@ -150,7 +150,23 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     if(!belongs(current)){const related=project.meta.findIndex((_,i)=>belongs(i));if(related>=0)$('rigLayer').value=String(related);}
     fields();binding();if(reveal){$('rigTabJoints').click();$('rigPanelJoints').parentElement.scrollTop=0;}
   }
-  function fields(){if(!project)return;const id=selected(),p=project.rig.points[id];updateWeightSelection();$('rigPoseReset').disabled=!project.rig.pose[id]&&!project.rig.poseOffsets?.[id];$('rigWeightBlend').value=project.rig.weightBlend?.[id]??1;$('rigWeightBlendValue').textContent=`${Number($('rigWeightBlend').value).toFixed(2)}배`;$('rigWeightBlend').disabled=project.rig.limbStyle!=='mesh'||! /^(elbow|wrist|knee|ankle|joint)_/.test(id);$('rigX').value=Math.round(p.x*10)/10;$('rigY').value=Math.round(p.y*10)/10;$('rigParent').value=project.rig.parents[id];$('rigAngle').value=project.rig.pose[id]||0;$('rigAngleInput').value=Math.round((project.rig.pose[id]||0)*10)/10;$('rigAngleValue').textContent=`${Math.round((project.rig.pose[id]||0)*10)/10}°`;$('rigDelete').disabled=!!boneLabels[id];$('rigUndo').disabled=!history.length;$('rigX').disabled=$('rigY').disabled=poseMode();$('rigAngle').disabled=$('rigAngleInput').disabled=$('rigAngleReset').disabled=!poseMode()||(project.rig.faceRig>=2&&id.startsWith('face_'));features?.controlFields();draw();}
+  function fields(){if(!project)return;const id=selected(),p=project.rig.points[id];updateWeightSelection();$('rigPoseReset').disabled=!project.rig.pose[id]&&!project.rig.poseOffsets?.[id]&&!project.rig.poseScales?.[id];$('rigWeightBlend').value=project.rig.weightBlend?.[id]??1;$('rigWeightBlendValue').textContent=`${Number($('rigWeightBlend').value).toFixed(2)}배`;$('rigWeightBlend').disabled=project.rig.limbStyle!=='mesh'||! /^(elbow|wrist|knee|ankle|joint)_/.test(id);$('rigX').value=Math.round(p.x*10)/10;$('rigY').value=Math.round(p.y*10)/10;$('rigParent').value=project.rig.parents[id];$('rigAngle').value=project.rig.pose[id]||0;$('rigAngleInput').value=Math.round((project.rig.pose[id]||0)*10)/10;$('rigAngleValue').textContent=`${Math.round((project.rig.pose[id]||0)*10)/10}°`;$('rigDelete').disabled=!!boneLabels[id];$('rigUndo').disabled=!history.length;$('rigX').disabled=$('rigY').disabled=poseMode();$('rigAngle').disabled=$('rigAngleInput').disabled=$('rigAngleReset').disabled=!poseMode();transformFields();features?.controlFields();draw();}
+  function transformFields(){
+    const r=project.rig,id=selected(),p=r.poseOffsets?.[id]||{x:0,y:0},sc=r.poseScales?.[id]||{x:1,y:1};
+    $('rigSetupPosition').hidden=poseMode();$('rigPoseTransform').hidden=!poseMode();
+    for(const [key,value]of Object.entries({rigPositionX:p.x,rigPositionY:p.y,rigScaleX:sc.x*100,rigScaleY:sc.y*100}))$(key).value=Math.round(value*100)/100;
+  }
+  function changeTransform(kind,axis,value){
+    if(!project||!poseMode()||processing||!Number.isFinite(value)){fields();return;}
+    const r=project.rig,id=selected();stop();remember();
+    if(kind==='position'){const p={x:0,y:0,...r.poseOffsets?.[id],[axis]:Math.max(-32768,Math.min(32768,value))};setJointOffset(r,id,p.x,p.y);}
+    else{const p={x:1,y:1,...r.poseScales?.[id]},next=Math.max(.05,Math.min(4,value/100)),other=axis==='x'?'y':'x';if($('rigScaleLink').checked)p[other]=Math.max(.05,Math.min(4,p[other]*next/p[axis]));p[axis]=next;setJointScale(r,id,p.x,p.y);}
+    dirty();fields();
+  }
+  for(const [key,kind,axis]of [['rigPositionX','position','x'],['rigPositionY','position','y'],['rigScaleX','scale','x'],['rigScaleY','scale','y']]){$(key).onchange=()=>changeTransform(kind,axis,Number($(key).value));$(key).onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();changeTransform(kind,axis,Number($(key).value));}};}
+  $('rigPositionReset').onclick=()=>{stop();remember();setJointOffset(project.rig,selected(),0,0);dirty();fields();};
+  $('rigScaleReset').onclick=()=>{stop();remember();setJointScale(project.rig,selected(),1,1);dirty();fields();};
+  $('rigPoseTool').onchange=()=>{stop();fields();};
   function binding(){const i=Number($('rigLayer').value);sleeveFields();$('rigBind').value=activeBone(project.rig,project.rig.assignments[i]);$('rigDeform').value=project.rig.modes[i];influenceFields();draw();}
   function sleeveFields(){
     const i=Number($('rigLayer').value),isArm=/^arm_(left|right)$/.test(project.rig.modes[i]),cfg=project.rig.sleeves?.[i];
@@ -187,7 +203,7 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     remember();drag={id:selected(),dx:project.rig.points[selected()].x-pos.x,dy:project.rig.points[selected()].y-pos.y};$('rigCanvas').setPointerCapture(e.pointerId);$('rigCanvas').focus();e.preventDefault();};
   $('rigCanvas').onpointermove=e=>{const p=mouse(e);if(features.pointerMove(p))return;if(!drag)return;setPoint(p.x+drag.dx,p.y+drag.dy);};
   const endDrag=e=>{if(features.pointerEnd(e)){status();return;}if(!drag)return;drag=null;if($('rigCanvas').hasPointerCapture(e.pointerId))$('rigCanvas').releasePointerCapture(e.pointerId);status();};$('rigCanvas').onpointerup=endDrag;$('rigCanvas').onpointercancel=endDrag;
-  $('rigCanvas').onkeydown=e=>{if(!project||processing||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key)||poseMode()&&!selected().startsWith('face_'))return;e.preventDefault();remember();const p=poseMode()?motionPoints(project.rig)[selected()]:project.rig.points[selected()],step=e.shiftKey?10:1,x=p.x+(e.key==='ArrowLeft'?-step:e.key==='ArrowRight'?step:0),y=p.y+(e.key==='ArrowUp'?-step:e.key==='ArrowDown'?step:0);if(poseMode()){moveFaceControl(project.rig,selected(),{x,y});dirty();fields();}else setPoint(x,y);};
+  $('rigCanvas').onkeydown=e=>{if(!project||processing||!['ArrowLeft','ArrowRight','ArrowUp','ArrowDown'].includes(e.key))return;e.preventDefault();remember();const p=poseMode()?motionPoints(project.rig)[selected()]:project.rig.points[selected()],step=e.shiftKey?10:1,x=p.x+(e.key==='ArrowLeft'?-step:e.key==='ArrowRight'?step:0),y=p.y+(e.key==='ArrowUp'?-step:e.key==='ArrowDown'?step:0);if(poseMode()){moveJoint(project.rig,selected(),{x,y});dirty();fields();}else setPoint(x,y);};
   $('rigX').onchange=$('rigY').onchange=()=>{remember();setPoint(Number($('rigX').value),Number($('rigY').value));};
   $('rigBone').onchange=()=>{stop();selectJoint(selected());};$('rigLayer').onchange=()=>{$('rigBone').value=activeBone(project.rig,project.rig.assignments[Number($('rigLayer').value)]);fields();binding();};
   $('rigBind').onchange=()=>{remember();project.rig.assignments[Number($('rigLayer').value)]=$('rigBind').value;project.rig.modes[Number($('rigLayer').value)]='rigid';if(project.rig.partBones)delete project.rig.partBones[Number($('rigLayer').value)];stop();dirty();binding();status();};
@@ -210,12 +226,12 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     e.preventDefault();(e.shiftKey?redo:undo)();
   });
   $('rigReinfer').onclick=()=>{if(!project)return;remember();const fresh=applyBuiltin(project.rig.frame||'full',project.layers.map((l,i)=>({...project.meta[i],data:pixels(l.canvas)})),project.rig.width,project.rig.height).rig;for(const id of Object.keys(fresh.points))if(boneLabels[id])project.rig.points[id]=fresh.points[id];dirty();fields();status();message('관절 위치를 파츠 모양에서 다시 추정했어요. 추가 관절과 연결 설정은 유지됩니다.');};
-  $('rigMode').onchange=()=>{stop();fields();message(poseMode()?(project.rig.frame==='bust'?'얼굴 점은 드래그·방향키로 이동합니다. 머리·목은 주황 손잡이로 회전합니다. 편집 포즈는 manual_pose로 저장합니다.':'주황 회전 손잡이를 끌거나 IK 손·발의 파란 사각점을 끌어보세요. 저장하면 manual_pose에 포함됩니다.'):'관절 점을 드래그하거나 X·Y를 입력하세요. 방향키 1px / Shift+방향키 10px.');};
-  let angleHistory=false;$('rigAngle').oninput=()=>{stop();if(!angleHistory){remember();angleHistory=true;}rotateJoint(project.rig,selected(),Number($('rigAngle').value));features.controlFields();$('rigPoseReset').disabled=!project.rig.pose[selected()]&&!project.rig.poseOffsets?.[selected()];$('rigAngleValue').textContent=`${$('rigAngle').value}°`;$('rigAngleInput').value=$('rigAngle').value;dirty();draw();};$('rigAngle').onchange=()=>angleHistory=false;
+  $('rigMode').onchange=()=>{stop();fields();message(poseMode()?'위치·회전·크기를 입력하거나 드래그 도구를 골라 관절을 움직이세요. 편집값은 manual_pose로 저장합니다.':'관절 점을 드래그하거나 X·Y를 입력하세요. 방향키 1px / Shift+방향키 10px.');};
+  let angleHistory=false;$('rigAngle').oninput=()=>{stop();if(!angleHistory){remember();angleHistory=true;}rotateJoint(project.rig,selected(),Number($('rigAngle').value));features.controlFields();$('rigPoseReset').disabled=!project.rig.pose[selected()]&&!project.rig.poseOffsets?.[selected()]&&!project.rig.poseScales?.[selected()];$('rigAngleValue').textContent=`${$('rigAngle').value}°`;$('rigAngleInput').value=$('rigAngle').value;dirty();draw();};$('rigAngle').onchange=()=>angleHistory=false;
   const setAngle=v=>{if(!Number.isFinite(v))return;stop();remember();v=Math.max(-180,Math.min(180,Math.round(v*10)/10));rotateJoint(project.rig,selected(),v);dirty();fields();};
   $('rigAngleInput').onchange=()=>setAngle(Number($('rigAngleInput').value));$('rigAngleInput').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();setAngle(Number($('rigAngleInput').value));}};
   $('rigAngleReset').onclick=()=>setAngle(0);
-  $('rigPoseReset').onclick=()=>{stop();remember();if(project.rig.poseOffsets)delete project.rig.poseOffsets[selected()];rotateJoint(project.rig,selected(),0);dirty();fields();message(`${project.rig.labels[selected()]||selected()}의 이동·회전을 초기화했어요. 다른 관절은 유지됩니다.`);};
+  $('rigPoseReset').onclick=()=>{stop();remember();resetJointPose(project.rig,selected());dirty();fields();message(`${project.rig.labels[selected()]||selected()}의 위치·회전·크기를 초기화했어요. 다른 관절은 유지됩니다.`);};
   $('rigSeams').onchange=()=>cleanup().catch(e=>message(e.message));$('rigClean').onclick=()=>cleanup().catch(e=>message(e.message));$('rigShowBones').onchange=()=>draw();$('rigAmplitude').oninput=()=>{dirty();if(!playing)draw();};
   $('rigPlay').onclick=()=>{if(playing){stop();draw();return;}playing=true;started=performance.now();$('rigPlay').textContent='정지 · 관절 편집';const frame=now=>{draw((now-started)/1000);raf=requestAnimationFrame(frame);};raf=requestAnimationFrame(frame);};$('rigDialog').onclose=stop;
   const filename=()=>(state.name||'character').replace(/[\\/:*?"<>|]/g,'_');

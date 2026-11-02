@@ -123,7 +123,7 @@ export function boneOrder(rig){
 }
 export function setParent(rig,name,parent){if(name==='root'||name===parent||!rig.points[parent])throw Error('부모 관절을 확인해주세요.');const old=rig.parents[name];rig.parents[name]=parent;try{boneOrder(rig);}catch(e){rig.parents[name]=old;throw e;}}
 export function addJoint(rig,label,parent){if(Object.keys(rig.points).length>=64)throw Error('관절은 최대 64개까지 추가할 수 있어요.');let n=1;while(rig.points[`joint_${n}`])n++;const id=`joint_${n}`,p=rig.points[parent]||rig.points.body;rig.points[id]={x:clamp(p.x+30,0,rig.width),y:clamp(p.y+30,0,rig.height)};rig.parents[id]=rig.points[parent]?parent:'body';rig.labels[id]=label.trim()||`추가 관절 ${n}`;if(rig.activeBones)rig.activeBones.push(id);return id;}
-export function deleteJoint(rig,id){if(boneLabels[id])throw Error('기본 관절은 삭제할 수 없어요.');const parent=rig.parents[id];for(const k in rig.parents)if(rig.parents[k]===id)rig.parents[k]=parent;rig.assignments=rig.assignments.map(x=>x===id?parent:x);if(rig.activeBones)rig.activeBones=rig.activeBones.filter(b=>b!==id);delete rig.points[id];delete rig.parents[id];delete rig.labels[id];delete rig.pose[id];if(rig.poseOffsets)delete rig.poseOffsets[id];if(rig.weightBlend)delete rig.weightBlend[id];if(rig.partBones)for(const k of Object.keys(rig.partBones)){rig.partBones[k]=rig.partBones[k].filter(b=>b!==id);if(!rig.partBones[k].length)delete rig.partBones[k];}}
+export function deleteJoint(rig,id){if(boneLabels[id])throw Error('기본 관절은 삭제할 수 없어요.');const parent=rig.parents[id];for(const k in rig.parents)if(rig.parents[k]===id)rig.parents[k]=parent;rig.assignments=rig.assignments.map(x=>x===id?parent:x);if(rig.activeBones)rig.activeBones=rig.activeBones.filter(b=>b!==id);delete rig.points[id];delete rig.parents[id];delete rig.labels[id];delete rig.pose[id];if(rig.poseOffsets)delete rig.poseOffsets[id];if(rig.poseScales)delete rig.poseScales[id];if(rig.weightBlend)delete rig.weightBlend[id];if(rig.partBones)for(const k of Object.keys(rig.partBones)){rig.partBones[k]=rig.partBones[k].filter(b=>b!==id);if(!rig.partBones[k].length)delete rig.partBones[k];}}
 // Setup pose: every limb bone points at its next joint so Spine shows real bone lengths and IK can bend them.
 function nextJoint(id){const m=id.match(/^(arm|elbow|hip|knee)_(left|right)$/);if(m)return `${{arm:'elbow',elbow:'wrist',hip:'knee',knee:'ankle'}[m[1]]}_${m[2]}`;return {body:'chest',upper:'chest',chest:'neck',neck:'head'}[id];}
 export function setupPose(rig){
@@ -480,12 +480,13 @@ export function makeSkeleton(parts,rig,amplitude=1){
   const ikNames=ik.map(c=>c.name),animations=templateAnimations(rig,ikNames,amplitude),manual={};
   for(const [id,value]of Object.entries(rig.pose||{}))if(active.has(id))manual[spineName(id)]={rotate:[{value}]};
   for(const [id,p]of Object.entries(facialOffsets(rig)))if(active.has(id))(manual[spineName(id)]??={}).translate=[{x:p.x,y:p.y}];
+  for(const [id,p]of Object.entries(rig.poseScales||{}))if(active.has(id))(manual[spineName(id)]??={}).scale=[{x:p.x,y:p.y}];
   animations.manual_pose={bones:manual};if(ikNames.length)animations.manual_pose.ik=Object.fromEntries(ikNames.map(n=>[n,[{mix:0}]]));
   const skeleton={skeleton:{spine:'4.0.64',x:-rig.width/2,y:0,width:rig.width,height:rig.height,images:'./images/',fps:30},bones,slots};
   if(ik.length)skeleton.ik=ik;
   const validNames=new Set(bones.map(b=>b.name));for(const anim of Object.values(animations))for(const name of Object.keys(anim.bones||{}))if(!validNames.has(name))delete anim.bones[name];
   // IK edits are also baked into FK rotations. Target keys let Spine retain the selected IK mode.
-  const posed=poseMatrices(skeleton,null,Object.fromEntries(Object.entries(rig.pose||{}).map(([id,v])=>[spineName(id),v])));
+  const posed=poseMatrices({...skeleton,animations},0,{},'manual_pose');
   for(const constraint of ik){const key=ikKeys.get(constraint.name);if(rig.ikModes?.[key]!=='ik')continue;
     const target=bones.find(b=>b.name===constraint.target),parent=posed[target.parent],end=posed[spineName(chainDefs[key][2])],dx=end[4]-parent[4],dy=end[5]-parent[5],det=parent[0]*parent[3]-parent[1]*parent[2];
     manual[target.name]={translate:[{x:round((parent[3]*dx-parent[2]*dy)/det-target.x),y:round((-parent[1]*dx+parent[0]*dy)/det-target.y)}]};
@@ -496,9 +497,9 @@ export function makeSkeleton(parts,rig,amplitude=1){
 function sample(frames,t,key,def){if(!frames?.length)return def;let a=frames[0],b=a;for(const f of frames){if((f.time||0)<=t)a=f;if((f.time||0)>=t){b=f;break;}b=f;}const at=a.time||0,bt=b.time||0,r=bt===at?0:(t-at)/(bt-at);return (a[key]??def)*(1-r)+(b[key]??def)*r;}
 export function animationDuration(animation){let d=0;for(const tl of Object.values(animation?.bones||{}))for(const frames of Object.values(tl))for(const f of frames)d=Math.max(d,f.time||0);return d;}
 // World matrices [a,b,c,d,x,y] per bone (Spine coordinates, y up). Pose angles are keyed by Spine bone name.
-export function poseMatrices(skeleton,time=null,pose={},animation='idle',offsets={}){
+export function poseMatrices(skeleton,time=null,pose={},animation='idle',offsets={},scales={}){
   const anim=time===null?null:skeleton.animations[animation],duration=animationDuration(anim),t=duration?(time%duration):0,m={};
-  for(const b of skeleton.bones){const tl=anim?.bones[b.name]||{},angle=((b.rotation||0)+sample(tl.rotate,t,'value',0)+(pose[b.name]||0))*D2R,sx=sample(tl.scale,t,'x',1),sy=sample(tl.scale,t,'y',1),a=Math.cos(angle)*sx,c=-Math.sin(angle)*sy,d=Math.cos(angle)*sy,bb=Math.sin(angle)*sx,x=(b.x||0)+sample(tl.translate,t,'x',0)+(offsets[b.name]?.x||0),y=(b.y||0)+sample(tl.translate,t,'y',0)+(offsets[b.name]?.y||0);
+  for(const b of skeleton.bones){const tl=anim?.bones[b.name]||{},angle=((b.rotation||0)+sample(tl.rotate,t,'value',0)+(pose[b.name]||0))*D2R,sx=sample(tl.scale,t,'x',1)*(scales[b.name]?.x??1),sy=sample(tl.scale,t,'y',1)*(scales[b.name]?.y??1),a=Math.cos(angle)*sx,c=-Math.sin(angle)*sy,d=Math.cos(angle)*sy,bb=Math.sin(angle)*sx,x=(b.x||0)+sample(tl.translate,t,'x',0)+(offsets[b.name]?.x||0),y=(b.y||0)+sample(tl.translate,t,'y',0)+(offsets[b.name]?.y||0);
     if(!b.parent){m[b.name]=[a,bb,c,d,x,y];continue;}const q=m[b.parent];m[b.name]=[q[0]*a+q[2]*bb,q[1]*a+q[3]*bb,q[0]*c+q[2]*d,q[1]*c+q[3]*d,q[0]*x+q[2]*y+q[4],q[1]*x+q[3]*y+q[5]];
   }return m;
 }

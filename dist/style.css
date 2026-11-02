@@ -294,3 +294,5 @@ dialog h2{font-size:17px;font-weight:600}
 .sample-card small{font-size:11px;color:var(--accent)}
 .sample-note{margin-top:16px;font-size:12px;line-height:1.7;color:var(--text-2)}
 @media(max-width:560px){.sample-grid{grid-template-columns:1fr}.sample-card{display:grid;grid-template-columns:92px 1fr;column-gap:12px;align-items:center}.sample-preview{grid-row:1/4;height:100px;margin:0}.sample-card strong,.sample-card>span:not(.sample-preview),.sample-card small{grid-column:2}}
+
+[hidden]{display:none!important}

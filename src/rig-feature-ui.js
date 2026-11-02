@@ -1,5 +1,5 @@
 import {activeIds,chainDefs,chainLabels,chainFor,availableChain} from './rig-scope.js';
-import {motionPoints,setChainMode,solveChain,solvePinned,rotateJoint,wrapAngle,moveFaceControl} from './rig-motion.js';
+import {motionWorld,motionPoints,setChainMode,solveChain,solvePinned,rotateJoint,wrapAngle,moveJoint,setJointScale} from './rig-motion.js';
 import {templateKinds,applyBuiltin,applyRigTemplate,createRigTemplate,readTemplates,saveTemplate,templateStorageKey,validateTemplate} from './rig-templates.js';
 import {initSleeves} from './garment-parts.js';
 
@@ -9,14 +9,14 @@ export function installRigFeatures({getProject,isBusy,pixels,selected,poseMode,r
   let drag=null,templates=readTemplates(localStorage);
   const scale=()=>rig().width/Math.max(200,$('rigCanvas').getBoundingClientRect().width);
   function controlFields(){
-    const r=rig();if(!r)return;$('rigLimbControls').hidden=r.frame==='bust';$('rigFaceControls').hidden=r.frame!=='bust';$('rigAiJoints').disabled=r.frame==='bust';$('rigMode').options[1].textContent=r.frame==='bust'?'포즈 편집 · 얼굴 이동 / 회전':'포즈 편집 · 직접 회전 / IK 이동';
+    const r=rig();if(!r)return;$('rigLimbControls').hidden=r.frame==='bust';$('rigFaceControls').hidden=r.frame!=='bust';$('rigAiJoints').disabled=r.frame==='bust';$('rigMode').options[1].textContent='포즈 편집 · 위치 / 회전 / 크기';
     for(const [key,id]of Object.entries(controls)){$(id).disabled=!availableChain(r,key);$(id).value=r.ikModes?.[key]||'fk';}
     const key=chainFor(selected()),ik=key&&availableChain(r,key)&&r.ikModes?.[key]==='ik';$('rigBendFlip').disabled=!ik||!poseMode();
     $('rigControlNote').textContent=ik?'손·발은 고정한 채 팔꿈치·무릎의 굽힘 방향을 바꿀 수 있어요. 각도를 직접 수정하면 해당 부위만 FK로 전환됩니다.':'회전은 자식 관절에도 전달됩니다. 회색 부위는 관절이 없거나 중간에 추가 본이 있어 2관절 IK를 사용할 수 없어요.';
-    $('rigGestureHint').textContent=poseMode()?(r.frame==='bust'?'얼굴 점: 이동 · 머리·목: 회전':'주황 손잡이: 회전 · 파란 사각점: IK 이동'):'점을 끌어 이동 · 방향키 1px · Shift 10px';
+    $('rigGestureHint').textContent=poseMode()?({move:'관절 드래그: 이동 · 방향키: 미세 이동',rotate:'주황 손잡이: 회전',scale:'가로로 드래그: 크기 조절'}[$('rigPoseTool').value]):'점을 끌어 이동 · 방향키 1px · Shift 10px';
   }
   for(const [key,id]of Object.entries(controls))$(id).onchange=()=>{
-    if(!rig()||isBusy())return;stop();remember();if(!setChainMode(rig(),key,$(id).value))return;
+    if(!rig()||isBusy())return;stop();remember();if(!setChainMode(rig(),key,$(id).value)){fields();message('가로·세로 크기가 다른 팔다리는 FK로 조절해주세요. 비균등 크기를 초기화하면 IK를 다시 사용할 수 있어요.');return;}
     $('rigMode').value='pose';$('rigIK').checked=rig().ik!==false;dirty();fields();message(`${chainLabels[key]} · ${$(id).value.toUpperCase()}로 전환했어요. 현재 포즈는 유지됩니다.`);
   };
   $('rigBendFlip').onclick=()=>{const r=rig(),key=chainFor(selected());if(!r||isBusy()||!key||r.ikModes?.[key]!=='ik')return;remember();r.ikBends??={};r.ikBends[key]=-(r.ikBends[key]||1);solveChain(r,key,r.ikTargets?.[key]||motionPoints(r)[chainDefs[key][2]]);dirty();fields();};
@@ -25,22 +25,23 @@ export function installRigFeatures({getProject,isBusy,pixels,selected,poseMode,r
     for(const [key,ids]of Object.entries(chainDefs))if(availableChain(r,key)&&r.ikModes?.[key]==='ik'){
       const p=points[ids[2]];ctx.fillStyle='#e0f7ff';ctx.strokeStyle='#0575bf';ctx.lineWidth=2*s;ctx.fillRect(p.x-7*s,p.y-7*s,14*s,14*s);ctx.strokeRect(p.x-7*s,p.y-7*s,14*s,14*s);
     }
-    const p=points[selected()];if(p&&!(r.faceRig>=2&&selected().startsWith('face_'))){ctx.strokeStyle='#cb6a00';ctx.fillStyle='#ffe0a0';ctx.lineWidth=1.5*s;ctx.setLineDash([3*s,3*s]);ctx.beginPath();ctx.arc(p.x,p.y,32*s,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x+32*s,p.y);ctx.stroke();ctx.beginPath();ctx.arc(p.x+32*s,p.y,6*s,0,Math.PI*2);ctx.fill();ctx.stroke();}
+    const p=points[selected()];if(p&&$('rigPoseTool').value!=='move'){ctx.strokeStyle='#cb6a00';ctx.fillStyle='#ffe0a0';ctx.lineWidth=1.5*s;ctx.setLineDash([3*s,3*s]);ctx.beginPath();ctx.arc(p.x,p.y,32*s,0,Math.PI*2);ctx.stroke();ctx.setLineDash([]);ctx.beginPath();ctx.moveTo(p.x,p.y);ctx.lineTo(p.x+32*s,p.y);ctx.stroke();ctx.beginPath();ctx.arc(p.x+32*s,p.y,6*s,0,Math.PI*2);ctx.fill();ctx.stroke();}
     ctx.restore();
   }
+  function pointerAngle(r,id,pos,pivot){const m=motionWorld(r)[r.parents[id]]?.matrix||[1,0,0,1],dx=pos.x-pivot.x,dy=pivot.y-pos.y,det=m[0]*m[3]-m[1]*m[2];return Math.atan2((-m[1]*dx+m[0]*dy)/det,(m[3]*dx-m[2]*dy)/det);}
   function pointerDown(e,pos,nearest){
     const r=rig();if(!r||!poseMode()||isBusy())return false;stop();const points=motionPoints(r),p=points[selected()],s=scale();
-    const handle=!(r.faceRig>=2&&selected().startsWith('face_'))&&p&&Math.hypot(pos.x-p.x-32*s,pos.y-p.y)<11*s;
+    const handle=$('rigPoseTool').value!=='move'&&p&&Math.hypot(pos.x-p.x-32*s,pos.y-p.y)<11*s;
     if(!handle&&!nearest)return false;const id=handle?selected():nearest;selectJoint(id,true);const key=chainFor(id),ik=!handle&&key&&r.ikModes?.[key]==='ik'&&chainDefs[key][2]===id;
-    const pivot=points[id];remember();drag={id,key,ik,face:!handle&&id.startsWith('face_'),pointer:pos,pivot,startPose:r.pose[id]||0,angle:Math.hypot(pos.x-pivot.x,pos.y-pivot.y)>4*s?Math.atan2(pos.y-pivot.y,pos.x-pivot.x):null};
+    const pivot=points[id];remember();drag={id,key,ik:ik&&$('rigPoseTool').value==='move',tool:$('rigPoseTool').value,startScale:{x:1,y:1,...r.poseScales?.[id]},pointer:pos,pivot,startPose:r.pose[id]||0,angle:Math.hypot(pos.x-pivot.x,pos.y-pivot.y)>4*s?pointerAngle(r,id,pos,pivot):null};
     $('rigCanvas').setPointerCapture(e.pointerId);$('rigCanvas').focus();e.preventDefault();return true;
   }
   function pointerMove(pos){
     if(!drag)return false;const r=rig();
-    if(drag.face){moveFaceControl(r,drag.id,{x:drag.pivot.x+pos.x-drag.pointer.x,y:drag.pivot.y+pos.y-drag.pointer.y});}else if(drag.ik){solveChain(r,drag.key,pos);solvePinned(r);}else{
-      const a=Math.atan2(pos.y-drag.pivot.y,pos.x-drag.pivot.x);if(Math.hypot(pos.x-drag.pivot.x,pos.y-drag.pivot.y)<4*scale())return true;
+    if(drag.ik){solveChain(r,drag.key,pos);solvePinned(r);}else if(drag.tool==='move'){moveJoint(r,drag.id,{x:drag.pivot.x+pos.x-drag.pointer.x,y:drag.pivot.y+pos.y-drag.pointer.y});}else if(drag.tool==='scale'){const f=Math.exp((pos.x-drag.pointer.x)/(100*scale())),limit=v=>Math.max(.05,Math.min(4,v));setJointScale(r,drag.id,limit(drag.startScale.x*f),$('rigScaleLink').checked?limit(drag.startScale.y*f):drag.startScale.y);}else{
+      const a=pointerAngle(r,drag.id,pos,drag.pivot);if(Math.hypot(pos.x-drag.pivot.x,pos.y-drag.pivot.y)<4*scale())return true;
       if(drag.angle===null){drag.angle=a;return true;}
-      rotateJoint(r,drag.id,wrapAngle(drag.startPose-(a-drag.angle)*180/Math.PI));
+      rotateJoint(r,drag.id,wrapAngle(drag.startPose+(a-drag.angle)*180/Math.PI));
     }dirty();fields();return true;
   }
   function pointerEnd(e){if(!drag)return false;drag=null;if($('rigCanvas').hasPointerCapture(e.pointerId))$('rigCanvas').releasePointerCapture(e.pointerId);return true;}

@@ -48,6 +48,6 @@ test('separate brows, whites, pupils and lossless upper/lower lids; pupil follow
  near([after.face_pupil_left.x,after.face_pupil_left.y],[p.x+4,p.y+2]);
  near([after.face_lid_upper_left.x-before.face_lid_upper_left.x,after.face_lid_upper_left.y-before.face_lid_upper_left.y],[1.8,1.1]);
  for(const id of ['face_brow_left','face_eye_left','face_mouth','face_nose','chest','face_hair_front'])near([after[id].x,after[id].y],[before[id].x,before[id].y]);
- rotateJoint(r,'face_nose',20);assert.equal(r.pose.face_nose,undefined);rotateJoint(r,'head',10);assert.equal(r.pose.head,10);
+ rotateJoint(r,'face_nose',20);assert.equal(r.pose.face_nose,20);rotateJoint(r,'head',10);assert.equal(r.pose.head,10);
  const sk=makeSkeleton(parts,r),world=poseMatrices(sk,0,{},'manual_pose');for(const [id,p]of Object.entries(motionPoints(r)))near([p.x,p.y],[r.points.root.x+world[spineName(id)][4],r.points.root.y-world[spineName(id)][5]]);
 });

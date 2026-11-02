@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=face-rig-3">
+<link rel="stylesheet" href="/style.css?v=transform-4">
 </head>
 <body>
 <header class="topbar">
@@ -17,7 +17,7 @@
     <span class="chip" id="fileTag">준비</span>
   </div>
   <div class="header-actions">
-    <span class="chip" id="appVersion">얼굴 리깅 3</span>
+    <span class="chip" id="appVersion">변형 편집 4</span>
     <button class="button ghost" id="helpBtn"><i data-lucide="circle-help"></i><span>사용 가이드</span></button>
     <button class="button ghost connection-btn" id="connectionBtn"><i data-lucide="plug-zap"></i><span>서버 연결</span></button>
   </div>
@@ -280,9 +280,19 @@
             <select id="rigBone" aria-label="선택한 관절"></select>
             <label class="field-label" for="rigMode">편집 모드</label>
             <select id="rigMode"><option value="setup">관절 위치 맞추기</option><option value="pose">포즈 편집 · 직접 회전 / IK 이동</option></select>
-            <div class="xy-row">
+            <div class="xy-row" id="rigSetupPosition">
               <label>X<input id="rigX" type="number" min="0" step="0.1"></label>
               <label>Y<input id="rigY" type="number" min="0" step="0.1"></label>
+            </div>
+            <div id="rigPoseTransform" hidden>
+              <label class="field-label" for="rigPoseTool">드래그 도구</label>
+              <select id="rigPoseTool"><option value="move">이동</option><option value="rotate">회전</option><option value="scale">크기 · 가로로 드래그</option></select>
+              <div class="field-heading"><span class="field-label">위치 변화 · px</span><button id="rigPositionReset" class="button subtle">위치 초기화</button></div>
+              <div class="xy-row"><label>X<input id="rigPositionX" aria-label="포즈 위치 X" type="number" min="-32768" max="32768" step="0.1" value="0"></label><label>Y<input id="rigPositionY" aria-label="포즈 위치 Y" type="number" min="-32768" max="32768" step="0.1" value="0"></label></div>
+              <div class="field-heading"><span class="field-label">크기 · %</span><button id="rigScaleReset" class="button subtle">크기 초기화</button></div>
+              <div class="xy-row"><label>X<input id="rigScaleX" aria-label="포즈 크기 X" type="number" min="5" max="400" step="1" value="100"></label><label>Y<input id="rigScaleY" aria-label="포즈 크기 Y" type="number" min="5" max="400" step="1" value="100"></label></div>
+              <label class="check-chip"><input id="rigScaleLink" type="checkbox" checked> 가로·세로 비율 유지</label>
+              <p class="field-note">위치는 원래 포즈에서의 변화량이며 부모 관절의 축을 따릅니다. 크기 100%가 기본입니다. 편집값은 Spine의 manual_pose로 저장됩니다.</p>
             </div>
             <div class="field-heading"><label class="field-label" for="rigAngle">관절 각도</label><output id="rigAngleValue">0°</output></div>
             <div class="angle-row">
@@ -292,7 +302,6 @@
             </div>
             <button id="rigPoseReset" class="button subtle full">선택 관절 포즈 초기화</button>
           </div>
-          <div class="card" id="rigFaceControls" hidden><h3>얼굴 포즈 조절</h3><button id="rigFaceRebuild" class="button primary full">목 복구 · 얼굴 리깅 다시 맞춤</button><p class="field-note">원본의 목 픽셀을 복구하고 위·아래 눈꺼풀과 앞·뒷머리를 다시 연결합니다. 현재 얼굴 포즈는 초기화됩니다. AI 사용 없음.</p><p class="field-note">얼굴 제어점은 이동 전용입니다. 눈썹·눈동자·위/아래 눈꺼풀을 따로 고를 수 있어요. 머리·목은 회전 손잡이를 사용하세요. 옷은 얼굴 가중치에서 제외됩니다.</p><p class="field-note">눈·입의 독립 조절은 분리된 파츠가 필요합니다. 눈꺼풀이 합쳐진 그림의 깜빡임은 자동 생성하지 않습니다.</p></div>
           <div class="card" id="rigLimbControls">
             <h3>팔·다리 조작 방식</h3>
             <p class="field-note">IK는 손·발의 사각점을 끌고, FK는 선택한 관절의 회전 손잡이를 끌어요. 전환해도 현재 포즈를 유지합니다.</p>
@@ -413,6 +422,10 @@
         </section>
 
         <section id="rigPanelFinish" role="tabpanel" aria-labelledby="rigTabFinish" hidden>
+          <details class="card fold" id="rigFaceControls" hidden>
+            <summary>기존 얼굴 작업 복구 · 필요할 때만</summary>
+            <div class="fold-body"><button id="rigFaceRebuild" class="button outlined full">목 복구 · 얼굴 리깅 다시 맞춤</button><p class="field-note">예전 분리 결과에 빈 목이나 잘못된 연결이 남았을 때만 사용하세요. 새 분리에는 자동 적용됩니다. 실행하면 현재 포즈가 초기화됩니다. AI 사용 없음.</p></div>
+          </details>
           <div class="card">
             <h3>내보내기 전 점검</h3>
             <p class="field-note">본 연결·빈 파츠·가중치 합과 ±60° 굽힘을 검사합니다.</p>
@@ -474,6 +487,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=face-rig-3"></script>
+<script type="module" src="/app.js?v=transform-4"></script>
 </body>
 </html>
