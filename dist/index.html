@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=rig-templates-1">
+<link rel="stylesheet" href="/style.css?v=sample-picker-1">
 </head>
 <body>
 <header class="topbar">
@@ -34,7 +34,7 @@
         <small>PNG · JPG · WebP / 최대 10MB</small>
       </label>
       <div class="link-row">
-        <button class="text-btn" id="sampleBtn"><i data-lucide="sparkles"></i>테스트 캐릭터</button>
+        <button class="text-btn" id="sampleBtn"><i data-lucide="sparkles"></i>테스트 이미지 선택</button>
         <button class="text-btn" id="rigDemo">분리된 샘플로 관절 편집</button>
       </div>
       <p class="source-info" id="sourceInfo">불러온 이미지가 없습니다</p>
@@ -169,6 +169,26 @@
     </div>
   </aside>
 </main>
+
+<dialog id="sampleDialog" class="sample-dialog" aria-labelledby="sampleTitle" aria-describedby="sampleDescription">
+  <form method="dialog"><div class="dialog-heading"><h2 id="sampleTitle">테스트 이미지 선택</h2><button class="icon-button" aria-label="테스트 이미지 선택 닫기"><i data-lucide="x"></i></button></div></form>
+  <p id="sampleDescription" class="dialog-intro">원하는 구도의 원본 이미지를 불러오세요. 선택만으로는 AI 사용량이 발생하지 않아요.</p>
+  <div class="sample-grid">
+    <button type="button" class="sample-card" data-sample="full" aria-label="전신 테스트 이미지 불러오기">
+      <span class="sample-preview checker"><img src="/sample-character.png" alt="" loading="lazy"></span>
+      <strong>전신</strong><span>머리부터 발끝까지</span><small>전신 템플릿 · 팔·다리 IK</small>
+    </button>
+    <button type="button" class="sample-card" data-sample="half" aria-label="상반신 테스트 이미지 불러오기">
+      <span class="sample-preview checker"><img src="/sample-half-body.png" alt="" loading="lazy"></span>
+      <strong>상반신</strong><span>머리·몸통·양팔과 손</span><small>반신 템플릿 · 팔 IK</small>
+    </button>
+    <button type="button" class="sample-card" data-sample="bust" aria-label="흉상 테스트 이미지 불러오기">
+      <span class="sample-preview checker"><img src="/sample-bust.png" alt="" loading="lazy"></span>
+      <strong>흉상</strong><span>얼굴·목·어깨</span><small>흉상 템플릿 · 목·어깨 회전</small>
+    </button>
+  </div>
+  <p class="sample-note">세 이미지는 아직 분리되지 않은 원본입니다. 불러온 뒤 AI 레이어 분리를 누르면 서버 사용량이 발생해요. 분리 없이 리깅을 체험하려면 기존 ‘분리된 샘플로 관절 편집’을 이용하세요.</p>
+</dialog>
 
 <dialog id="connectionDialog">
   <form method="dialog"><div class="dialog-heading"><h2>AI 서버 연결</h2><button class="icon-button" aria-label="닫기"><i data-lucide="x"></i></button></div></form>
@@ -448,6 +468,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=rig-templates-1"></script>
+<script type="module" src="/app.js?v=sample-picker-1"></script>
 </body>
 </html>
