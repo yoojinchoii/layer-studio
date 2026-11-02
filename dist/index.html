@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=transform-4">
+<link rel="stylesheet" href="/style.css?v=position-5">
 </head>
 <body>
 <header class="topbar">
@@ -17,7 +17,7 @@
     <span class="chip" id="fileTag">준비</span>
   </div>
   <div class="header-actions">
-    <span class="chip" id="appVersion">변형 편집 4</span>
+    <span class="chip" id="appVersion">위치 슬라이더 5</span>
     <button class="button ghost" id="helpBtn"><i data-lucide="circle-help"></i><span>사용 가이드</span></button>
     <button class="button ghost connection-btn" id="connectionBtn"><i data-lucide="plug-zap"></i><span>서버 연결</span></button>
   </div>
@@ -288,7 +288,8 @@
               <label class="field-label" for="rigPoseTool">드래그 도구</label>
               <select id="rigPoseTool"><option value="move">이동</option><option value="rotate">회전</option><option value="scale">크기 · 가로로 드래그</option></select>
               <div class="field-heading"><span class="field-label">위치 변화 · px</span><button id="rigPositionReset" class="button subtle">위치 초기화</button></div>
-              <div class="xy-row"><label>X<input id="rigPositionX" aria-label="포즈 위치 X" type="number" min="-32768" max="32768" step="0.1" value="0"></label><label>Y<input id="rigPositionY" aria-label="포즈 위치 Y" type="number" min="-32768" max="32768" step="0.1" value="0"></label></div>
+              <div class="position-row"><label for="rigPositionSliderX">X</label><input id="rigPositionSliderX" aria-label="포즈 위치 X 슬라이더" type="range" min="-100" max="100" step="0.1" value="0"><input id="rigPositionX" aria-label="포즈 위치 X" type="number" min="-32768" max="32768" step="0.1" value="0"></div>
+              <div class="position-row"><label for="rigPositionSliderY">Y</label><input id="rigPositionSliderY" aria-label="포즈 위치 Y 슬라이더" type="range" min="-100" max="100" step="0.1" value="0"><input id="rigPositionY" aria-label="포즈 위치 Y" type="number" min="-32768" max="32768" step="0.1" value="0"></div>
               <div class="field-heading"><span class="field-label">크기 · %</span><button id="rigScaleReset" class="button subtle">크기 초기화</button></div>
               <div class="xy-row"><label>X<input id="rigScaleX" aria-label="포즈 크기 X" type="number" min="5" max="400" step="1" value="100"></label><label>Y<input id="rigScaleY" aria-label="포즈 크기 Y" type="number" min="5" max="400" step="1" value="100"></label></div>
               <label class="check-chip"><input id="rigScaleLink" type="checkbox" checked> 가로·세로 비율 유지</label>
@@ -487,6 +488,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=transform-4"></script>
+<script type="module" src="/app.js?v=position-5"></script>
 </body>
 </html>

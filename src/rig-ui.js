@@ -155,15 +155,17 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     const r=project.rig,id=selected(),p=r.poseOffsets?.[id]||{x:0,y:0},sc=r.poseScales?.[id]||{x:1,y:1};
     $('rigSetupPosition').hidden=poseMode();$('rigPoseTransform').hidden=!poseMode();
     for(const [key,value]of Object.entries({rigPositionX:p.x,rigPositionY:p.y,rigScaleX:sc.x*100,rigScaleY:sc.y*100}))$(key).value=Math.round(value*100)/100;
+    for(const axis of ['x','y']){const slider=$(`rigPositionSlider${axis.toUpperCase()}`),limit=Math.min(32768,Math.max(100,Math.ceil(Math.abs(p[axis])/100)*100));slider.min=-limit;slider.max=limit;slider.value=p[axis];slider.setAttribute('aria-valuetext',`${Math.round(p[axis]*10)/10} px`);}
   }
-  function changeTransform(kind,axis,value){
+  function changeTransform(kind,axis,value,record=true){
     if(!project||!poseMode()||processing||!Number.isFinite(value)){fields();return;}
-    const r=project.rig,id=selected();stop();remember();
+    const r=project.rig,id=selected();stop();if(record)remember();
     if(kind==='position'){const p={x:0,y:0,...r.poseOffsets?.[id],[axis]:Math.max(-32768,Math.min(32768,value))};setJointOffset(r,id,p.x,p.y);}
     else{const p={x:1,y:1,...r.poseScales?.[id]},next=Math.max(.05,Math.min(4,value/100)),other=axis==='x'?'y':'x';if($('rigScaleLink').checked)p[other]=Math.max(.05,Math.min(4,p[other]*next/p[axis]));p[axis]=next;setJointScale(r,id,p.x,p.y);}
     dirty();fields();
   }
   for(const [key,kind,axis]of [['rigPositionX','position','x'],['rigPositionY','position','y'],['rigScaleX','scale','x'],['rigScaleY','scale','y']]){$(key).onchange=()=>changeTransform(kind,axis,Number($(key).value));$(key).onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();changeTransform(kind,axis,Number($(key).value));}};}
+  for(const axis of ['x','y']){const slider=$(`rigPositionSlider${axis.toUpperCase()}`);let editing=false;slider.oninput=()=>{changeTransform('position',axis,Number(slider.value),!editing);editing=true;};slider.onchange=slider.onblur=slider.onpointercancel=()=>{editing=false;};}
   $('rigPositionReset').onclick=()=>{stop();remember();setJointOffset(project.rig,selected(),0,0);dirty();fields();};
   $('rigScaleReset').onclick=()=>{stop();remember();setJointScale(project.rig,selected(),1,1);dirty();fields();};
   $('rigPoseTool').onchange=()=>{stop();fields();};
