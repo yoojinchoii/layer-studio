@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=face-rig-2">
+<link rel="stylesheet" href="/style.css?v=face-rig-3">
 </head>
 <body>
 <header class="topbar">
@@ -17,6 +17,7 @@
     <span class="chip" id="fileTag">준비</span>
   </div>
   <div class="header-actions">
+    <span class="chip" id="appVersion">얼굴 리깅 3</span>
     <button class="button ghost" id="helpBtn"><i data-lucide="circle-help"></i><span>사용 가이드</span></button>
     <button class="button ghost connection-btn" id="connectionBtn"><i data-lucide="plug-zap"></i><span>서버 연결</span></button>
   </div>
@@ -60,7 +61,8 @@
           <label class="field-label hidden" id="qwenCountLabel" for="qwenCount">레이어 수</label>
           <input class="hidden" type="number" id="qwenCount" min="2" max="12" value="4">
           <label class="switch-row"><span>분리 후 PSD 자동 저장</span><input id="autoPsd" type="checkbox" checked></label>
-          <label class="switch-row"><span>분리 후 보정·리깅까지</span><input id="autoAfterAI" type="checkbox" checked></label>
+          <label class="switch-row"><span>분리 후 리깅 편집창 열기</span><input id="autoAfterAI" type="checkbox" checked></label>
+          <p class="hint">목 복구·파츠 보정·리깅은 분리 후 자동 적용됩니다.</p>
         </div>
       </details>
       <button class="button primary full" id="runBtn" disabled><i data-lucide="scan-line"></i> AI 레이어 분리</button>
@@ -472,6 +474,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=face-rig-2"></script>
+<script type="module" src="/app.js?v=face-rig-3"></script>
 </body>
 </html>
