@@ -6,3 +6,6 @@ const layer=(name,visible=true)=>({name,x:20,y:20,width:10,height:20,data:new Ui
 test('audit catches clothing on arm bones and visible empty sprites without changing the rig',()=>{
  const layers=[layer('topwear'),layer('empty'),layer('hidden',false)];layers[1].data.fill(0);layers[2].data.fill(0);const rig=inferRig(layers,100,150);rig.assignments[0]='arm_left';const before=JSON.stringify(rig),parts=buildParts(layers,rig),report=auditRig(parts,rig,makeSkeleton(parts,rig));assert.ok(report.issues.some(i=>i.part==='topwear'));assert.ok(report.issues.some(i=>i.part==='empty'));assert.ok(!report.issues.some(i=>i.part==='hidden'));assert.equal(JSON.stringify(rig),before);assert.equal(report.poses,12);
 });
+test('arm attachment behind torso is still an arm, not torso clothing',()=>{
+ const l=layer('forearm_R_behind_torso');l.art={role:'forearm',bone:'elbow_left',allowed_bones:['elbow_left']};const rig=inferRig([l],100,150);rig.assignments[0]='elbow_left';rig.modes[0]='rigid';const parts=buildParts([l],rig),report=auditRig(parts,rig,makeSkeleton(parts,rig));assert.ok(!report.issues.some(i=>i.message.includes('의상이')));
+});
