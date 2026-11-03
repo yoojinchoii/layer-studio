@@ -22,4 +22,4 @@ export function reconstructArm(layer,visible,chain,widthScale=1){
  for(let i=0;i<N;i++)if(coverage[i]>0){const k=nearest[i]*4;data.set(visible.subarray(k,k+3),i*4);data[i*4+3]=Math.round(coverage[i]*255);if(visible[i*4+3]<250)fill[i]=1;}
  return fill.some(Boolean)?{data,fill}:null;
 }
-export function armFillSignature(rig){return JSON.stringify([rig.points,rig.limbStyle,rig.modes,rig.sleeves,rig.armSplits]);}
+export function armFillSignature(rig){return JSON.stringify([2,rig.points,rig.limbStyle,rig.modes,rig.sleeves,rig.armSplits]);}

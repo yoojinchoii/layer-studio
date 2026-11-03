@@ -46,6 +46,14 @@ export function separateArms(layer,rig,index){
   let target=owner[k];for(const side of [cfg.front==='left'?'right':'left',cfg.front])if(cfg.hands?.[side]&&insidePolygon(p,cfg.hands[side]))target=2+sides.indexOf(side);
   out[target].set(layer.data.subarray(k*4,k*4+4),k*4);
  }
+ // Contact shadows and antialias fringes belong to the occlusion, not the arm.
+ // Remove a small halo only when reconstruction is enabled; the support below is inpainted.
+ if(cfg.reconstruct&&sides.every(s=>cfg.hands?.[s])){
+  const r=Math.max(2,Math.min(5,Math.ceil(Math.min(layer.width,layer.height)*.025)));
+  for(let i=0;i<owner.length;i++)if(out[2][i*4+3]||out[3][i*4+3]){const x=i%layer.width,y=Math.floor(i/layer.width);
+   for(let dy=-r;dy<=r;dy++)for(let dx=-r;dx<=r;dx++){const xx=x+dx,yy=y+dy;if(dx*dx+dy*dy>r*r||xx<0||yy<0||xx>=layer.width||yy>=layer.height)continue;const k=(yy*layer.width+xx)*4;out[0][k+3]=out[1][k+3]=0;}
+  }
+ }
  const parts=out.map((data,i)=>crop(layer,data,sides[i%2],i>=2)).filter(Boolean);
  // All hands are above all arms. Crossed hands can cover the opposite upper arm.
  parts.sort((a,b)=>(a.role==='separated-hand'?0:1)-(b.role==='separated-hand'?0:1)||(a.armSide===cfg.front?-1:1)-(b.armSide===cfg.front?-1:1));

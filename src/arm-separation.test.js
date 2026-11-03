@@ -35,7 +35,7 @@ test('reconstruction adds masked support behind visible arms and hands, and surv
  const before=separateArms(ls[2],r,2),key=armFillSignature(r);r.armSplits[2].reconstruct=true;
  const after=separateArms(ls[2],r,2),supports=after.filter(p=>p.reconstruction);
  assert.equal(supports.length,2);assert.notEqual(armFillSignature(r),key);
- assert.deepEqual(after.filter(p=>!p.reconstruction),before,'visible pixels and hand ownership unchanged');
+ assert.deepEqual(after.filter(p=>p.role==='separated-hand'),before.filter(p=>p.role==='separated-hand'),'hand pixels and ownership unchanged');
  assert.ok(after.slice(0,2).every(p=>p.role==='separated-hand'),'both hands above both arms');
  for(const p of supports){assert.equal(p.fill.length,p.width*p.height);assert.ok(p.fill.some((v,i)=>v&&p.data[i*4+3]>0),'inpaint has actual alpha to restore');assert.deepEqual(p.allowedBones,p.armSide==='left'?['arm_left','elbow_left','wrist_left']:['arm_right','elbow_right','wrist_right']);}
  const copy=JSON.parse(JSON.stringify(r));validateArmSplits(copy,ls.length);assert.deepEqual(separateArms(ls[2],copy,2),after);
