@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=arms-10">
+<link rel="stylesheet" href="/style.css?v=hands-11">
 </head>
 <body>
 <header class="topbar">
@@ -17,7 +17,7 @@
     <span class="chip" id="fileTag">준비</span>
   </div>
   <div class="header-actions">
-    <span class="chip" id="appVersion">양팔 분리·리깅 10</span>
+    <span class="chip" id="appVersion">손·팔 연결 11</span>
     <button class="button ghost" id="helpBtn"><i data-lucide="circle-help"></i><span>사용 가이드</span></button>
     <button class="button ghost connection-btn" id="connectionBtn"><i data-lucide="plug-zap"></i><span>서버 연결</span></button>
   </div>
@@ -374,7 +374,7 @@
             <h3>파츠 연결</h3>
             <label class="field-label" for="rigLayer">파츠</label>
             <select id="rigLayer" aria-label="연결할 파츠"></select>
-            <label class="field-label" for="rigBind">연결할 뼈대</label>
+            <div id="rigGenericBinding"><label class="field-label" for="rigBind">연결할 뼈대</label>
             <select id="rigBind" aria-label="연결할 뼈대"></select>
             <label class="field-label" for="rigDeform">변형 방식</label>
             <select id="rigDeform">
@@ -392,21 +392,41 @@
               <option value="foot_right">왼 신발 · 화면 오른쪽</option>
             </select>
             <p class="field-note">흉상 템플릿은 얼굴·머리카락에 전용 메쉬를 적용합니다. 눈·입은 실제 분리된 파츠만 개별 제어하며, 한 장에 그려진 눈의 깜빡임은 지원하지 않습니다.</p>
+            </div>
           </div>
 
           <div id="rigArmSplitTools" class="card" hidden>
-            <h3>양팔 분리·관절 맞추기</h3>
+            <h3>겹친 팔과 손 정리</h3>
             <p id="rigArmSplitNote" class="field-note"></p>
-            <button id="rigArmSplitStart" class="button primary full">양팔 분리 초안 만들기</button>
-            <div class="button-pair"><button id="rigArmGuideLeft" class="button outlined">오른팔(R) 3점 맞추기</button><button id="rigArmPartsCancel" hidden>3점 맞추기 취소</button><button id="rigArmGuideRight" class="button outlined">왼팔(L) 3점 맞추기</button></div>
-            <label class="field-label" for="rigArmFront">앞에 보이는 팔</label><select id="rigArmFront"><option value="left">오른팔(R) · 주황</option><option value="right">왼팔(L) · 파랑</option></select>
-            <label class="field-label" for="rigArmBias">앞 팔의 영역 넓히기 · px</label><input id="rigArmBias" type="range" min="-30" max="30" value="0" step="1">
-            <label class="switch-row"><span>양팔 영역 색상 보기</span><input id="rigShowArmRegions" type="checkbox"></label>
-            <label class="switch-row"><span>영역 브러시 켜기</span><input id="rigArmPaint" type="checkbox"></label>
-            <select id="rigArmPaintSide" aria-label="칠할 팔 영역"><option value="left">오른팔(R) 영역 · 주황</option><option value="right">왼팔(L) 영역 · 파랑</option></select>
-            <label class="field-label" for="rigArmRadius">브러시 반경 · px</label><input id="rigArmRadius" type="range" min="2" max="40" step="1" value="8">
-            <p class="field-note">관절 위치 모드에서 칠합니다. 색상은 편집용이며 저장 이미지에는 들어가지 않아요. 겹쳐 가려진 그림은 생성하지 않으므로 팔을 벌리면 빈 부분이 보일 수 있어요.</p>
-            <button id="rigArmSplitReset" class="button subtle full">분리 취소 · 원본 양팔로</button>
+            <div class="arm-step"><h4>1. 고칠 팔 선택</h4>
+              <select id="rigArmSide" aria-label="고칠 팔"><option value="left">주황 · 캐릭터 오른팔(R)</option><option value="right">파랑 · 캐릭터 왼팔(L)</option></select>
+              <p class="field-note">팔짱을 끼면 손은 반대편에 있어요. 손의 화면 위치가 아니라 어깨부터 이어지는 팔을 선택하세요.</p>
+            </div>
+            <div class="arm-step"><h4>2. 관절 위치 확인</h4>
+              <p class="field-note">어깨 → 팔꿈치 → 손목을 차례로 클릭합니다. 이미 맞으면 건너뛰세요.</p>
+              <button id="rigArmGuideSelected" class="button outlined full">선택한 팔의 관절 3점 맞추기</button>
+              <button id="rigArmPartsCancel" class="button subtle full" hidden>관절 맞추기 취소</button>
+            </div>
+            <div class="arm-step"><h4>3. 이 팔의 손 지정</h4>
+              <p class="field-note">손목부터 손가락까지 테두리를 여러 점으로 둘러주세요. 선택한 손은 이 팔의 손목에만 붙습니다.</p>
+              <button id="rigHandStart" class="button primary full">손 테두리 지정하기</button>
+              <p id="rigHandProgress" class="field-note" role="status" aria-live="polite"></p>
+              <div id="rigHandActions" hidden><button id="rigHandApply" class="button primary full">이 손을 선택한 팔에 붙이기</button><div class="button-pair"><button id="rigHandBack" class="button outlined">마지막 점 취소</button><button id="rigHandCancel" class="button subtle">취소</button></div></div>
+              <button id="rigHandClear" class="button subtle full" hidden>선택한 손 지정 해제</button>
+            </div>
+            <label class="switch-row"><span>팔별 색상 보기 · 주황 / 파랑</span><input id="rigShowArmRegions" type="checkbox"></label>
+            <p class="field-note">색은 편집 표시입니다. 저장 이미지에는 들어가지 않아요. 팔을 크게 벌릴 때 필요한 가려진 그림은 별도 복원해야 합니다.</p>
+            <details class="fold"><summary>팔 영역을 더 고치기</summary><div class="fold-body">
+              <p class="field-note">손 지정 전에도 팔 영역 초안을 만들 수 있어요. 가까운 관절을 기준으로 나누므로 정확한 자동 인식 결과는 아닙니다.</p>
+              <button id="rigArmSplitStart" class="button outlined full">팔 영역 초안 만들기</button>
+              <label class="switch-row"><span>칠한 부분을 선택한 팔로 옮기기</span><input id="rigArmPaint" type="checkbox"></label>
+              <select id="rigArmPaintSide" hidden aria-label="칠할 팔 영역"><option value="left">오른팔(R)</option><option value="right">왼팔(L)</option></select>
+              <label class="field-label" for="rigArmRadius">칠하기 크기</label><input id="rigArmRadius" type="range" min="2" max="40" step="1" value="8">
+              <p class="field-note">지정한 손은 보호됩니다. 손 경계는 위의 ‘손 테두리 지정하기’로 다시 그려주세요.</p>
+              <label class="field-label" for="rigArmFront">겹치는 손 영역의 우선순위</label><select id="rigArmFront"><option value="left">주황 오른손 먼저</option><option value="right">파랑 왼손 먼저</option></select>
+              <label class="field-label" for="rigArmBias">자동으로 나눈 팔 경계 조절</label><input id="rigArmBias" type="range" min="-30" max="30" value="0" step="1">
+              <button id="rigArmSplitReset" class="button subtle full">손·팔 분리 취소 · 원본으로</button>
+            </div></details>
           </div>
           <div id="rigSleeveTools" class="card" hidden>
             <h3>소매와 맨팔 분리</h3>
@@ -515,6 +535,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=arms-10"></script>
+<script type="module" src="/app.js?v=hands-11"></script>
 </body>
 </html>

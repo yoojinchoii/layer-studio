@@ -258,7 +258,7 @@ export function buildParts(layers,rig){
   layers.forEach((original,i)=>{
     const facial=!!facialLayers[i];
     for(const l of separatedLayers[i]){
-      const mode=rig.modes[i]==='crossed_arms'?'rigid':facial||l.role==='sleeve'||l.role==='separated-arm'?l.mode:rig.modes[i],bone=rig.modes[i]==='crossed_arms'?'chest':facial||l.role==='sleeve'||l.role==='separated-arm'?l.bone:rig.assignments[i];
+      const mode=rig.modes[i]==='crossed_arms'?'rigid':facial||l.role==='sleeve'||['separated-arm','separated-hand'].includes(l.role)?l.mode:rig.modes[i],bone=rig.modes[i]==='crossed_arms'?'chest':facial||l.role==='sleeve'||['separated-arm','separated-hand'].includes(l.role)?l.bone:rig.assignments[i];
       const garment=mode==='face'||mode==='bottoms'||mode==='torso'||mode==='neck'||mode.startsWith('sleeve_'),split=cutout&&!garment&&mode!=='rigid'?splitLimb(l,rig,mode):null;
       const sides=!cutout&&(mode==='legs'||mode==='feet')&&l.data?splitMeshSides(l,rig,mode):null;
       if(sides?.length)parts.push(...sides.map(p=>({...p,source:i})));
