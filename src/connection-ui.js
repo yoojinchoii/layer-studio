@@ -20,7 +20,7 @@ export function installConnectionUI({state,updateRun,updateEngine,toast}){
       const info=await response.json();if(ticket!==generation)return;
       const supported=Array.from($('engine').options).filter(o=>Array.isArray(info.engines)&&info.engines.includes(o.value));
       if(info.service!=='layer-studio'||info.api_version!==1||!supported.length)throw Error('지원되는 Layer Studio 서버가 아닙니다.');
-      state.server={...config,asyncJobs:info.async_jobs===true,rigAssist:info.rig_assist===true};for(const option of $('engine').options)option.disabled=!info.engines.includes(option.value);
+      state.server={...config,asyncJobs:info.async_jobs===true,rigAssist:info.rig_assist===true,artPipeline:info.art_pipeline===1};for(const option of $('engine').options)option.disabled=!info.engines.includes(option.value);
       if($('engine').selectedOptions[0]?.disabled){$('engine').value=supported[0].value;updateEngine();}
       let remembered=false;
       if($('rememberConnection').checked){try{writeConnection(localStorage,config);remembered=true;}catch{note('연결됐지만 브라우저 저장을 사용할 수 없어 이번 창에서만 유지돼요.');}}

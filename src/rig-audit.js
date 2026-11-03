@@ -1,4 +1,4 @@
-import {poseMatrices,meshWorldVertices} from './rig-core.js';
+import {poseMatrices,meshWorldVertices,spineName} from './rig-core.js';
 export function auditRig(parts,rig,sk){
   const issues=[],seen=new Set(),add=(part,message)=>{const key=part+'|'+message;if(!seen.has(key)){seen.add(key);issues.push({part,message});}};
   const rest=poseMatrices(sk),poseIds=sk.bones.map(b=>b.name).filter(n=>/^(upper_arm|forearm|shin)_[RL]$/.test(n));
@@ -6,9 +6,10 @@ export function auditRig(parts,rig,sk){
   const area=(v,t,k)=>{const [a,b,c]=t.slice(k,k+3).map(i=>v[i]);return (b[0]-a[0])*(c[1]-a[1])-(b[1]-a[1])*(c[0]-a[0]);};
   for(const p of parts){if(p.visible===false)continue;if(rig.modes[p.source]==='split_arms')add(p.name,'양팔 분리 초안입니다. 가려진 피부 복원과 경계 확인이 필요합니다.');if(rig.modes[p.source]==='crossed_arms')add(p.name,'양팔이 한 파츠입니다. 현재 가슴에 고정되어 있으며 개별 팔 모션에는 좌우 분리·가려진 그림 복원이 필요합니다.');
     if(p.data&&!p.data.some((v,i)=>i%4===3&&v>8)){add(p.name,'보이는 픽셀이 없는 빈 파츠');continue;}
-    if(/topwear|sleeve|상의|소매/i.test(p.name)&&/arm|elbow|wrist/.test(p.bone))add(p.name,'의상이 팔 본에 연결되어 함께 움직입니다.');
+    if(/topwear|torso|상의/i.test(p.name)&&/arm|elbow|wrist/.test(p.bone))add(p.name,'의상이 팔 본에 연결되어 함께 움직입니다.');
+    if(p.art&&p.bone!==p.art.bone)add(p.name,'파츠의 해부학적 소속과 현재 본 연결이 다릅니다.');
     const a=sk.skins[0].attachments[p.slot]?.[p.slot];if(a?.type!=='mesh')continue;
-    let invalid=false,cursor=0;for(let v=0;v<a.uvs.length/2;v++){let sum=0;const n=a.vertices[cursor++];for(let j=0;j<n;j++){const bi=a.vertices[cursor];if(!sk.bones[bi]){invalid=true;add(p.name,'존재하지 않는 본 연결');}sum+=a.vertices[cursor+3];cursor+=4;}if(!Number.isFinite(sum)||Math.abs(sum-1)>.001)add(p.name,'정점의 가중치 합이 100%가 아닙니다.');}
+    let invalid=false,cursor=0;for(let v=0;v<a.uvs.length/2;v++){let sum=0;const n=a.vertices[cursor++];for(let j=0;j<n;j++){const bi=a.vertices[cursor];if(!sk.bones[bi]){invalid=true;add(p.name,'존재하지 않는 본 연결');}if(p.art?.allowed_bones&&!p.art.allowed_bones.map(spineName).includes(sk.bones[bi]?.name)&&a.vertices[cursor+3]>.005)add(p.name,'허용하지 않은 신체/의상 본의 가중치가 섞였습니다.');sum+=a.vertices[cursor+3];cursor+=4;}if(!Number.isFinite(sum)||Math.abs(sum-1)>.001)add(p.name,'정점의 가중치 합이 100%가 아닙니다.');}
     if(invalid)continue;
     const v0=meshWorldVertices(a,sk,rest);
     for(const pose of poses){const v1=meshWorldVertices(a,sk,pose);let unstable=0,painted=0;

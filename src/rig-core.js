@@ -250,8 +250,8 @@ const slug=s=>String(s).replace(/[^\p{L}\p{N}_-]+/gu,'_').replace(/^_+|_+$/g,'')
 // Layers (front-to-back, with RGBA data) become Spine parts: limbs are cut at joints in cutout style.
 export function buildParts(layers,rig){
   const cutout=(rig.limbStyle??'cutout')==='cutout',parts=[],used=new Map();
-  const facialLayers=layers.map((l,i)=>rig.faceRig>=2&&rig.modes[i]==='face'?splitFaceLids(l,rig):null);
-  const separatedLayers=layers.map((l,i)=>facialLayers[i]||separateArms(l,rig,i)||separateSleeve(l,rig,i)||[l]);
+  const facialLayers=layers.map((l,i)=>!rig.artPrepared&&rig.faceRig>=2&&rig.modes[i]==='face'?splitFaceLids(l,rig):null);
+  const separatedLayers=layers.map((l,i)=>rig.artPrepared?[l]:facialLayers[i]||separateArms(l,rig,i)||separateSleeve(l,rig,i)||[l]);
   // A shirt torso must not be weighted as an integrated sleeve when that sleeve is
   // already supplied by a separate sprite (including sleeves extracted from arm layers).
   const detachedSleeves=[...new Set([...['left','right'].filter(side=>!independentArm(rig,side)||rig.modes.includes('split_arms')),...separatedLayers.flatMap((ls,i)=>ls.map(l=>l.mode||rig.modes[i]).filter(m=>/^sleeve_(left|right)$/.test(m)).map(m=>m.slice(7)))])];

@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=arms-12-r4">
+<link rel="stylesheet" href="/style.css?v=art-pipeline-13">
 </head>
 <body>
 <header class="topbar">
@@ -17,7 +17,7 @@
     <span class="chip" id="fileTag">준비</span>
   </div>
   <div class="header-actions">
-    <span class="chip" id="appVersion">가려진 팔 복원 12</span>
+    <span class="chip" id="appVersion">파츠 검수 파이프라인 13</span>
     <button class="button ghost" id="helpBtn"><i data-lucide="circle-help"></i><span>사용 가이드</span></button>
     <button class="button ghost connection-btn" id="connectionBtn"><i data-lucide="plug-zap"></i><span>서버 연결</span></button>
   </div>
@@ -61,12 +61,23 @@
           <label class="field-label hidden" id="qwenCountLabel" for="qwenCount">레이어 수</label>
           <input class="hidden" type="number" id="qwenCount" min="2" max="12" value="4">
           <label class="switch-row"><span>분리 후 PSD 자동 저장</span><input id="autoPsd" type="checkbox" checked></label>
-          <label class="switch-row"><span>분리 후 리깅 편집창 열기</span><input id="autoAfterAI" type="checkbox" checked></label>
-          <p class="hint">목 복구·파츠 보정·리깅은 분리 후 자동 적용됩니다.</p>
+          <label class="switch-row"><span>검사 통과 후 리깅 편집창 열기</span><input id="autoAfterAI" type="checkbox" checked></label>
+          <p class="hint">구조 분석·분리·숨은 면 복원·원본/의상 검사를 통과한 뒤 리깅합니다. 확인이 필요한 결과는 자동 적용하지 않습니다.</p>
         </div>
       </details>
-      <button class="button primary full" id="runBtn" disabled><i data-lucide="scan-line"></i> AI 레이어 분리</button>
+      <button class="button primary full" id="runBtn" disabled><i data-lucide="scan-line"></i> 분리·복원·검사 시작</button>
       <p class="run-hint" id="runHint"><i data-lucide="unplug"></i> GPU 서버 연결 후 사용할 수 있어요</p>
+      <button id="analyzeSavedBtn" class="button secondary" style="width:100%;margin-top:10px" disabled>기존 파츠 분석·복원·검사</button>
+      <section id="artPipeline" class="art-pipeline" hidden aria-live="polite">
+        <h3 id="artPipelineTitle">파츠 검사</h3>
+        <ol id="artStages"></ol>
+        <ul id="artIssues"></ul>
+        <p id="artRawHint" class="field-note"></p>
+        <button id="artRetry" class="button secondary">저장된 파츠로 분석·복원 재검사</button>
+        <p class="field-note">See-through 분리는 반복하지 않습니다. 구조 분석·복원 GPU 사용량은 발생합니다.</p>
+        <button id="artCandidateSave" class="button secondary" hidden>검토용 복원 후보 PSD</button>
+        <button id="artReportSave" class="button subtle">검사 기록 저장</button>
+      </section>
       <button id="stopBtn" class="button subtle full hidden">대기 중단</button>
     </section>
 
@@ -539,6 +550,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=arms-12-r4"></script>
+<script type="module" src="/app.js?v=art-pipeline-13"></script>
 </body>
 </html>

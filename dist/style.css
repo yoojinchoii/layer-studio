@@ -303,3 +303,5 @@ dialog h2{font-size:17px;font-weight:600}
 [hidden]{display:none!important}
 
 .arm-step{margin-top:14px;padding-top:12px;border-top:1px solid var(--line)}.arm-step h4{font-size:13px;margin:0 0 8px}.arm-step .button.full{margin-top:8px}
+
+.art-pipeline{margin-top:16px;padding:12px;border:1px solid #405068;border-radius:10px;background:#111b26}.art-pipeline h3{font-size:13px;margin:0 0 12px}.art-pipeline ol,.art-pipeline ul{padding-left:18px;font-size:12px;line-height:1.7}.art-pipeline [data-status=passed]{color:#77ddc6}.art-pipeline [data-status=review],#artIssues{color:#f0bd81}.art-pipeline .button{width:100%;white-space:normal;margin-top:8px}
