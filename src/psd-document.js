@@ -3,7 +3,7 @@ export function partCategory(name){
   const n=name.toLowerCase();
   if(/hair|머리카락/.test(n))return '머리카락';
   if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return '얼굴';
-  if(/sleeve|topwear|bottomwear|상의|하의|소매|skirt/.test(n))return '의상';
+  if(/sleeve|topwear|bottomwear|torso|accessory|상의|하의|소매|skirt/.test(n))return '의상';
   if(/neck|목/.test(n))return '목';
   if(/handwear|arm|forearm|hand_|팔|손/.test(n))return '팔·손';
   if(/legwear|footwear|thigh|shin|foot_|shoe|다리|신발/.test(n))return '다리·발';

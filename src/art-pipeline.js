@@ -49,7 +49,7 @@ export function installArtReport({state,retry,download}){
     document.getElementById('artIssues').replaceChildren(...issues.slice(0,12).map(i=>{const li=document.createElement('li');li.textContent=i.message;return li;}));
     document.getElementById('artRetry').disabled=state.busy||!state.server?.artPipeline||state.layers.length<2;
     document.getElementById('artCandidateSave').hidden=!state.artCandidate;
-    document.getElementById('artRawHint').textContent=p.status==='needs_review'?'원본/분리 결과를 유지했습니다. 후보 PSD는 확인용이며 자동 적용되지 않습니다.':'검사 통과는 모든 포즈의 그림 품질을 보장하지 않습니다.';
+    document.getElementById('artRawHint').textContent=p.status==='needs_review'?'원본/분리 결과를 유지했습니다. 후보 PSD는 확인용이며 자동 적용되지 않습니다.':'자동 검사는 드로잉 완료 판정이 아닙니다. 오른쪽 「파츠 펼쳐보기」와 리깅 모션에서 실제 그림을 확인하세요.';
   }
   document.getElementById('artRetry').onclick=retry;
   document.getElementById('artReportSave').onclick=()=>download(new Blob([JSON.stringify(state.pipeline,null,2)],{type:'application/json'}),'art-quality-report.json');

@@ -1,4 +1,5 @@
 import {validateWorkspace} from './project-file.js';
+import {installPartInspector} from './part-inspector.js';
 import {normalizeReport,invalidateArt,artAllowsRig,installArtReport,ART_STAGES} from './art-pipeline.js';
 import {psdDocument} from './psd-document.js';
 import {installRecovery} from './project-store.js';
@@ -90,6 +91,8 @@ if(document.modelContext?.registerTool){const lifecycle=new AbortController();co
 function pausePolling(ms,signal){return new Promise((resolve,reject)=>{if(signal.aborted){reject(new DOMException('Aborted','AbortError'));return;}const abort=()=>{clearTimeout(timer);reject(new DOMException('Aborted','AbortError'));};const timer=setTimeout(()=>{signal.removeEventListener('abort',abort);resolve();},ms);signal.addEventListener('abort',abort,{once:true});});}
 async function cancelActiveJob(){const job=activeJob;if(!job)return;const response=await fetch(`${job.connection.url}/api/jobs/${encodeURIComponent(job.id)}`,{method:'DELETE',headers:{Authorization:`Bearer ${job.connection.token}`},signal:AbortSignal.timeout(15000)});if(!response.ok)throw Error('취소 요청 실패');}
 artUI=installArtReport({state,retry:()=>runAI(true),download});
+const partInspector=installPartInspector({state,select:id=>{state.selected=id;renderLayers();}});
+$('inspectParts').onclick=()=>partInspector.open();
 $('analyzeSavedBtn').onclick=()=>runAI(true);
 $('artCandidateSave').onclick=async()=>{if(!state.artCandidate||state.busy)return;setBusy(true,'복원 후보 PSD 준비');try{const layers=[];for(const l of state.artCandidate){const c=await imageCanvas(new Blob([Uint8Array.from(atob(l.image_b64),c=>c.charCodeAt(0))],{type:'image/png'}));layers.push({...layer(l.label,c,l.x,l.y)});}download(new Blob([writePsd(psdDocument(layers,state.width,state.height),{generateThumbnail:false})],{type:'image/vnd.adobe.photoshop'}),safeName(state.name)+'-검토용-복원후보.psd');}catch(e){toast(e.message);}finally{setBusy(false);}};
 rigUI=installRigUI({state,canvas,canvasBlob,download,toast,render});
@@ -118,3 +121,11 @@ recovery=installRecovery({isBusy:()=>state.busy||rigUI.isProcessing(),notify:toa
 state.onEdited=()=>recovery.changed();
 $('workspaceSave').onclick=()=>{const record=captureWorkspace();if(!record)return;download(new Blob([JSON.stringify(record.snapshot)],{type:'application/json'}),safeName(state.name)+'-project.json');toast('파츠·관절·검사 기록을 저장했어요. 편집 프로젝트 열기로 이어갈 수 있습니다.');};
 $('rigProjectInput').onchange=async e=>{try{const file=e.target.files[0];if(!file)return;if(file.size>60*1024*1024)throw Error('편집 프로젝트는 60MB 이하로 열어주세요.');await recovery.flush();await restoreWorkspace({id:crypto.randomUUID(),snapshot:JSON.parse(await file.text())});recovery.changed();toast('저장한 작업을 열었어요. AI 분리를 다시 실행하지 않았습니다.');}catch(err){toast(err.message);}finally{e.target.value='';}};
+$('redrawDemo').onclick=async()=>{
+  if(state.busy||rigUI.isProcessing())return;
+  setBusy(true,'재드로잉 예제 불러오기','저장된 파츠와 관절을 불러옵니다. AI를 실행하지 않습니다.');
+  try{await recovery.flush();const response=await fetch('/redraw-demo-16.json');if(!response.ok)throw Error('보정 예제를 불러오지 못했습니다.');
+    await restoreWorkspace({id:crypto.randomUUID(),snapshot:await response.json()});recovery.changed();
+    toast('개별 재드로잉한 검수 예제입니다. 새 이미지의 서버 자동 결과와는 구분해주세요.');
+  }catch(error){toast(error.message);}finally{setBusy(false);}
+};
