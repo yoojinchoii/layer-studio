@@ -58,7 +58,7 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
     const items=[];for(const p of todo)items.push({image:await b64(await canvasBlob(p.canvas)),mask:await b64(await canvasBlob(maskCanvas(p.fill,p.width,p.height)))});
     const res=await call('/api/inpaint',JSON.stringify({items}),'application/json'),images=project.fill?.key===key?{...project.fill.images}:{};
     for(const [k,p]of todo.entries()){const bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(res.images[k]),c=>c.charCodeAt(0))],{type:'image/png'}));const c=canvas(p.width,p.height);c.getContext('2d').drawImage(bitmap,0,0);bitmap.close();images[p.slot]=c.getContext('2d').getImageData(0,0,p.width,p.height).data;}
-    project.fill={key,images};dirty();draw();status();message('가려진 부분과 관절 이음새를 AI로 다시 그렸어요.');}
+    if(key!==fillKey())throw Error('복원 중 관절이나 영역이 바뀌어 결과를 적용하지 않았어요. 현재 설정으로 다시 복원해주세요.');project.fill={key,images};dirty();draw();status();message('가려진 부분과 관절 이음새를 AI로 다시 그렸어요.');}
   const pushHistory=(stack,value)=>{stack.push(value);if(stack.length>40)stack.shift();};
   const remember=()=>{if(!project)return;const value=JSON.stringify(project.rig);if(history.at(-1)!==value)pushHistory(history,value);future=[];$('rigUndo').disabled=false;};
   function restoreHistory(from,to,label){cancelHandSelection();armGuide=null;$('rigArmGuideCancel').hidden=true;if(!project||!from.length)return false;stop();pushHistory(to,JSON.stringify(project.rig));project.rig=JSON.parse(from.pop());sleeveHistory=weightHistory=angleHistory=false;dirty();menus();message(label);return true;}
