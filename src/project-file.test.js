@@ -1,0 +1,4 @@
+import {test} from 'node:test';import assert from 'node:assert/strict';import {validateWorkspace} from './project-file.js';
+const saved=()=>({format:'layer-studio-workspace-v1',width:100,height:100,original:'data:image/png;base64,AA==',layers:[{name:'hand_R',width:20,height:30,x:50,y:40,opacity:1,visible:true,image:'data:image/png;base64,AA=='}],pipeline:{status:'needs_review'},artCandidate:[{label:'hand_R',image_b64:'AA=='}]});
+test('unrigged saved work keeps failed inspection and its candidate without running AI',()=>{const p=saved();assert.equal(validateWorkspace(p),p);assert.equal(p.pipeline.status,'needs_review');assert.equal(p.artCandidate.length,1);});
+test('corrupt coordinates and oversized layer pixels are rejected before decoding',()=>{const p=saved();p.layers[0].x=NaN;assert.throws(()=>validateWorkspace(p));const q=saved();q.layers[0].width=8192;q.layers[0].height=8192;assert.throws(()=>validateWorkspace(q));});

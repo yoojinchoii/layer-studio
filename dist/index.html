@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=art-pipeline-13">
+<link rel="stylesheet" href="/style.css?v=art-quality-15">
 </head>
 <body>
 <header class="topbar">
@@ -17,7 +17,7 @@
     <span class="chip" id="fileTag">준비</span>
   </div>
   <div class="header-actions">
-    <span class="chip" id="appVersion">파츠 검수 파이프라인 13</span>
+    <span class="chip" id="appVersion">파츠 품질 보정 15</span>
     <button class="button ghost" id="helpBtn"><i data-lucide="circle-help"></i><span>사용 가이드</span></button>
     <button class="button ghost connection-btn" id="connectionBtn"><i data-lucide="plug-zap"></i><span>서버 연결</span></button>
   </div>
@@ -93,6 +93,8 @@
     <section class="step step-last">
       <header class="step-head"><span class="step-no muted-no"><i data-lucide="folder-open"></i></span><h2>프로젝트</h2></header>
       <button id="rigProjectOpen" class="button outlined full">편집 프로젝트 열기</button>
+      <button id="workspaceSave" class="button outlined full" style="margin-top:8px" disabled>현재 작업 저장 · JSON</button>
+      <p class="field-note">저장한 JSON을 열면 파츠·관절·검사 기록을 이어서 편집합니다. AI 분리는 다시 실행하지 않아요.</p>
       <input id="rigProjectInput" type="file" accept="application/json,.json" hidden>
       <details class="fold recovery-card">
         <summary>최근 작업 이어하기</summary>
@@ -550,6 +552,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=art-pipeline-13"></script>
+<script type="module" src="/app.js?v=art-quality-15"></script>
 </body>
 </html>
