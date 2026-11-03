@@ -23,7 +23,10 @@ export function reconstructArm(layer,visible,chain,widthScale=1){
  for(let i=0;i<N;i++)if(visible[i*4+3]>128){nearest[i]=i;queue[tail++]=i;}
  if(!tail)return null;
  for(let head=0;head<tail;head++){const i=queue[head],x=i%W;for(const j of [x>0?i-1:-1,x<W-1?i+1:-1,i-W,i+W])if(j>=0&&j<N&&nearest[j]===-1){nearest[j]=nearest[i];queue[tail++]=j;}}
- for(let i=0;i<N;i++)if(coverage[i]>0){const k=nearest[i]*4;data.set(visible.subarray(k,k+3),i*4);data[i*4+3]=Math.round(coverage[i]*255);if(visible[i*4+3]<250)fill[i]=1;}
+ for(let i=0;i<N;i++){
+  if(coverage[i]>0){const k=nearest[i]*4;data.set(visible.subarray(k,k+3),i*4);data[i*4+3]=Math.round(coverage[i]*255);if(visible[i*4+3]<250)fill[i]=1;}
+  if(visible[i*4+3]){for(let c=0;c<3;c++)data[i*4+c]=visible[i*4+c];data[i*4+3]=Math.max(data[i*4+3],visible[i*4+3]);}
+ }
  return fill.some(Boolean)?{data,fill}:null;
 }
-export function armFillSignature(rig){return JSON.stringify([3,rig.points,rig.limbStyle,rig.modes,rig.sleeves,rig.armSplits]);}
+export function armFillSignature(rig){return JSON.stringify([4,rig.points,rig.limbStyle,rig.modes,rig.sleeves,rig.armSplits]);}

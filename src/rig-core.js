@@ -330,7 +330,9 @@ function weightGuide(layer,rig,mode,bone,x,y){
     const garmentHip=mode==='bottoms'&&i===1,limbRoot=i===1&&!mode.startsWith('sleeve_')&&!garmentHip;if((garmentHip||limbRoot)&&next)dir=unit(next.x-p.x,next.y-p.y)||dir;
     const len=(garmentHip||limbRoot)&&next?Math.hypot(next.x-p.x,next.y-p.y):Math.hypot(p.x-prev.x,p.y-prev.y),after=next?Math.hypot(next.x-p.x,next.y-p.y):len;
     const maxBand=Math.max(1,Math.min(len,after)*.3);
-    const thickness=layer.data?halfWidth(layer,p,dir):null;
+    // Visible fragments and their reconstructed underlay must use the same
+    // weights at the same point. Fragment-dependent widths pull their seam apart.
+    const thickness=layer.role==='separated-arm'?null:layer.data?halfWidth(layer,p,dir):null;
     const blend=clamp(Number(rig.weightBlend?.[names[i]])||1,.35,2);
     // The whole waist is wider than one trouser leg, so a garment hip uses a thigh-length band instead.
     const band=clamp((garmentHip?len*.18:thickness===null?Math.min(len,after)*.12:Math.max(2,thickness)*1.25)*blend,1,maxBand);

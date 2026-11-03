@@ -62,7 +62,7 @@ export function separateArms(layer,rig,index){
  parts.sort((a,b)=>(a.role==='separated-hand'?0:1)-(b.role==='separated-hand'?0:1)||(a.armSide===cfg.front?-1:1)-(b.armSide===cfg.front?-1:1));
  if(cfg.reconstruct&&sides.every(s=>cfg.hands?.[s]))for(let i=0;i<2;i++){
   const restored=reconstructArm(layer,out[i],chains[i],cfg.widthScale||1);if(!restored)continue;
-  const p=crop(layer,restored.data,sides[i],false,restored.fill);if(p){p.name+='_hidden';p.reconstruction=true;parts.push(p);}
+  const p=crop(layer,restored.data,sides[i],false,restored.fill);if(p){p.reconstruction=true;const existing=parts.findIndex(q=>q.armSide===sides[i]&&q.role==='separated-arm');if(existing>=0)parts[existing]=p;else parts.push(p);}
  }
  return parts;
 }
