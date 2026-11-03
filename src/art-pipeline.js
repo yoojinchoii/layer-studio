@@ -11,6 +11,10 @@ export function normalizeReport(input){
   return report;
 }
 export function artAllowsRig(report){return normalizeReport(report)?.rig_allowed===true;}
+export function psdDelivery(report){
+  const review=!!report&&!artAllowsRig(report);
+  return {autoDownload:!review,suffix:review?'-검토용-분리원본.psd':'-parts.psd',title:review?'검토용 PSD · 복원 검사 미통과':'레이어 PSD 준비 완료'};
+}
 export function invalidateArt(report){return report?{...report,status:'needs_review',rig_allowed:false,issues:[...(report.issues||[]).filter(i=>i.code!=='edited'),{code:'edited',message:'파츠 위치·순서·표시·이미지가 바뀌어 이전 검사가 무효화됐습니다. 재검사해주세요.'}],stages:report.stages.map(s=>['structure','materials','rig'].includes(s.id)?{...s,status:'pending',detail:'파츠 변경 후 재검사 필요'}:s)}:null;}
 export function exportAllowed(report){return !report||artAllowsRig(report)&&report.status==='rig_passed';}
 export function completeRigReview(report,audit){

@@ -1,6 +1,12 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {normalizeReport,artAllowsRig,exportAllowed,completeRigReview,applyArtBindings,ART_STAGES} from './art-pipeline.js';
 const report=()=>({version:'art-pipeline-1',status:'art_passed',rig_allowed:true,stages:ART_STAGES.map(id=>({id,status:id==='rig'?'pending':'passed'})),analysis:{joints:{wrist_R:[900,500]}}});
+test('failed artwork is never automatically delivered as a finished PSD',async()=>{
+  const {psdDelivery}=await import('./art-pipeline.js');const p=report();p.stages[4].status='review';
+  assert.equal(psdDelivery(p).autoDownload,false);assert.match(psdDelivery(p).suffix,/검토용/);
+  assert.equal(psdDelivery({status:'art_passed'}).autoDownload,false);
+  assert.equal(psdDelivery(report()).autoDownload,true);assert.equal(psdDelivery(null).autoDownload,true);
+});
 test('a forged pass with a failed semantic stage cannot unlock rigging',()=>{const p=report();p.stages[4].status='review';assert.equal(artAllowsRig(p),false);assert.equal(exportAllowed(p),false);});
 test('art passing does not unlock export before mesh audit',()=>{assert.equal(exportAllowed(report()),false);const passed=completeRigReview(report(),{parts:10,poses:12,issues:[]});assert.equal(exportAllowed(passed),true);const bad=completeRigReview(report(),{parts:10,poses:12,issues:[{message:'mesh fold'}]});assert.equal(exportAllowed(bad),false);assert.equal(artAllowsRig(bad),true);});
 test('anatomical right wrist remains right when crossing image centre; shirt only uses torso bones',()=>{const rig={width:101,height:101,points:Object.fromEntries(['wrist_left','arm_left','elbow_left','body','upper','chest'].map(k=>[k,{x:1,y:1}])),assignments:[],modes:[]};applyArtBindings(rig,[{name:'torso',art:{role:'torso',bone:'chest',mode:'torso',allowed_bones:['body','upper','chest']}}],report());assert.deepEqual(rig.points.wrist_left,{x:90,y:50});assert.deepEqual(rig.partBones[0],['body','upper','chest']);assert.deepEqual(rig.sleeves,{});});
