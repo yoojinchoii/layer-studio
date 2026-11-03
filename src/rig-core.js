@@ -51,7 +51,7 @@ export function cleanPixels(data,w,h,strength=1){
 }
 // Internal joint ids keep screen sides (left = screen left). Spine names use the character's side,
 // so the screen-left arm becomes the character's right arm (_R), matching See-through labels.
-export const boneLabels={...faceLabels,root:'전체 기준',body:'허리 (상·하체 기준)',upper:'상체',pelvis:'하체',chest:'가슴',neck:'목',head:'머리',hair:'머리카락',arm_left:'오른 어깨 (화면 왼쪽)',elbow_left:'오른 팔꿈치 (화면 왼쪽)',wrist_left:'오른 손목 (화면 왼쪽)',arm_right:'왼 어깨 (화면 오른쪽)',elbow_right:'왼 팔꿈치 (화면 오른쪽)',wrist_right:'왼 손목 (화면 오른쪽)',hip_left:'오른 고관절 (화면 왼쪽)',knee_left:'오른 무릎 (화면 왼쪽)',ankle_left:'오른 발목 (화면 왼쪽)',hip_right:'왼 고관절 (화면 오른쪽)',knee_right:'왼 무릎 (화면 오른쪽)',ankle_right:'왼 발목 (화면 오른쪽)'};
+export const boneLabels={...faceLabels,root:'전체 기준',body:'허리 (상·하체 기준)',upper:'상체',pelvis:'하체',chest:'가슴',neck:'목',head:'머리',hair:'머리카락',arm_left:'오른 어깨 (R)',elbow_left:'오른 팔꿈치 (R)',wrist_left:'오른 손목 (R)',arm_right:'왼 어깨 (L)',elbow_right:'왼 팔꿈치 (L)',wrist_right:'왼 손목 (L)',hip_left:'오른 고관절 (화면 왼쪽)',knee_left:'오른 무릎 (화면 왼쪽)',ankle_left:'오른 발목 (화면 왼쪽)',hip_right:'왼 고관절 (화면 오른쪽)',knee_right:'왼 무릎 (화면 오른쪽)',ankle_right:'왼 발목 (화면 오른쪽)'};
 export const spineNames={root:'root',body:'hip',upper:'upper_body',pelvis:'lower_body',chest:'torso',neck:'neck',head:'head',hair:'hair',arm_left:'upper_arm_R',elbow_left:'forearm_R',wrist_left:'hand_R',hip_left:'thigh_R',knee_left:'shin_R',ankle_left:'foot_R',arm_right:'upper_arm_L',elbow_right:'forearm_L',wrist_right:'hand_L',hip_right:'thigh_L',knee_right:'shin_L',ankle_right:'foot_L'};
 export const spineName=id=>spineNames[id]||id;
 const defaultParents={body:'root',upper:'body',pelvis:'body',chest:'upper',neck:'chest',head:'neck',hair:'head',arm_left:'chest',elbow_left:'arm_left',wrist_left:'elbow_left',arm_right:'chest',elbow_right:'arm_right',wrist_right:'elbow_right',hip_left:'pelvis',knee_left:'hip_left',ankle_left:'knee_left',hip_right:'pelvis',knee_right:'hip_right',ankle_right:'knee_right'};
@@ -547,6 +547,7 @@ export function matchOriginal(layers,original){
 }
 // Older projects had no separate upper/lower body bones: insert them under the waist.
 export function upgradeRig(rig){
+  for(const side of ['left','right'])for(const joint of ['arm','elbow','wrist']){const id=`${joint}_${side}`,label=rig.labels?.[id];if(typeof label==='string'&&/^(오른|왼) (어깨|팔꿈치|손목) \(화면 (왼쪽|오른쪽)\)$/.test(label))rig.labels[id]=boneLabels[id];}
   const P=rig.points;if(!P?.body||P.upper&&P.pelvis)return rig;const h=rig.height||768;
   if(!P.upper){P.upper={x:P.body.x,y:Math.max(0,P.body.y-h*.015)};rig.parents.upper='body';rig.labels.upper=boneLabels.upper;for(const k in rig.parents)if(k!=='upper'&&k!=='pelvis'&&rig.parents[k]==='body'&&!/^hip_/.test(k))rig.parents[k]='upper';}
   if(!P.pelvis){P.pelvis={x:P.body.x,y:Math.min(h,P.body.y+h*.015)};rig.parents.pelvis='body';rig.labels.pelvis=boneLabels.pelvis;for(const k of ['hip_left','hip_right'])if(rig.parents[k]==='body')rig.parents[k]='pelvis';rig.assignments=rig.assignments.map(a=>a==='body'?'pelvis':a);}
