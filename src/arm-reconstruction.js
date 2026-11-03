@@ -11,7 +11,11 @@ export function reconstructArm(layer,visible,chain,widthScale=1){
    for(const sign of [-1,1]){let run=0;for(let d=0;d<len*.3;d++){const x=Math.floor(cx-dy/len*d*sign-layer.x),y=Math.floor(cy+dx/len*d*sign-layer.y);if(x<0||y<0||x>=W||y>=H||visible[(y*W+x)*4+3]<128)break;run=d;}if(sign<0)negative=run;else positive=run;}
    if(negative>2&&positive>2)samples.push(Math.min(negative,positive));
   }
-  samples.sort((a,b)=>a-b);const radius=clamp(samples.length?samples[Math.floor(samples.length/2)]:len*.15,4,len*.23)*widthScale;
+  // An occluded forearm often contains only a thin visible strip. Its width is not
+  // the limb's thickness; use the upper-arm length as a conservative lower bound.
+  const upperLength=Math.hypot(chain[1].x-chain[0].x,chain[1].y-chain[0].y);
+  const minimum=Math.max(2,Math.min(len,upperLength)*.18);
+  samples.sort((a,b)=>a-b);const radius=clamp(samples.length?samples[Math.floor(samples.length/2)]:minimum,minimum,Math.max(minimum,len*.23))*widthScale;
   for(let y=0;y<H;y++)for(let x=0;x<W;x++){const px=layer.x+x+.5,py=layer.y+y+.5,t=clamp(((px-a.x)*dx+(py-a.y)*dy)/(len*len),0,1),r=radius*(s===1?1-t*.25:1),d=Math.hypot(px-a.x-t*dx,py-a.y-t*dy);coverage[y*W+x]=Math.max(coverage[y*W+x],clamp(r+.5-d,0,1));}
  }
  // Nearest owned pixel is only a preview colour, not a claimed AI reconstruction.
@@ -22,4 +26,4 @@ export function reconstructArm(layer,visible,chain,widthScale=1){
  for(let i=0;i<N;i++)if(coverage[i]>0){const k=nearest[i]*4;data.set(visible.subarray(k,k+3),i*4);data[i*4+3]=Math.round(coverage[i]*255);if(visible[i*4+3]<250)fill[i]=1;}
  return fill.some(Boolean)?{data,fill}:null;
 }
-export function armFillSignature(rig){return JSON.stringify([2,rig.points,rig.limbStyle,rig.modes,rig.sleeves,rig.armSplits]);}
+export function armFillSignature(rig){return JSON.stringify([3,rig.points,rig.limbStyle,rig.modes,rig.sleeves,rig.armSplits]);}

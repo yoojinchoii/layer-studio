@@ -36,7 +36,10 @@ export function separateArms(layer,rig,index){
  const cfg=rig.armSplits?.[index]||{front:'left',bias:0,strokes:[]},sides=['left','right'],chains=sides.map(s=>armIds(s).map(id=>rig.points[id]));if(chains.flat().some(p=>!p))return null;
  const owner=new Uint8Array(layer.width*layer.height),out=Array.from({length:4},()=>new Uint8ClampedArray(layer.data.length));
  for(let y=0;y<layer.height;y++)for(let x=0;x<layer.width;x++){const k=y*layer.width+x;if(!layer.data[k*4+3])continue;const p={x:layer.x+x+.5,y:layer.y+y+.5},ds=chains.map(c=>Math.min(dist(p,c[0],c[1]),dist(p,c[1],c[2])));
-  ds[cfg.front==='left'?0:1]-=cfg.bias||0;owner[k]=ds[0]<=ds[1]?0:1;
+  const front=cfg.front==='left'?0:1;ds[front]-=cfg.bias||0;owner[k]=ds[0]<=ds[1]?0:1;
+  // At a crossing, the visible foreground arm owns the overlap even when a
+  // hidden wrist is nearer. Distance alone cuts the foreground forearm in two.
+  if(cfg.reconstruct&&sides.every(s=>cfg.hands?.[s])){const c=chains[front],radius=Math.hypot(c[1].x-c[0].x,c[1].y-c[0].y)*.25;if(Math.min(dist(p,c[0],c[1]),dist(p,c[1],c[2]))<=radius)owner[k]=front;}
  }
  for(const stroke of cfg.strokes||[]){const side=stroke.side==='left'?0:1,r=stroke.radius,x0=Math.max(0,Math.floor(stroke.x-layer.x-r)),x1=Math.min(layer.width-1,Math.ceil(stroke.x-layer.x+r)),y0=Math.max(0,Math.floor(stroke.y-layer.y-r)),y1=Math.min(layer.height-1,Math.ceil(stroke.y-layer.y+r));
   for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)if(Math.hypot(layer.x+x+.5-stroke.x,layer.y+y+.5-stroke.y)<=r)owner[y*layer.width+x]=side;

@@ -42,3 +42,11 @@ test('reconstruction adds masked support behind visible arms and hands, and surv
  copy.armSplits[2].hands.left[0].x++;assert.notEqual(armFillSignature(copy),armFillSignature(r));
  copy.armSplits[2].widthScale=Infinity;assert.throws(()=>validateArmSplits(copy,ls.length));
 });
+
+test('an occluded one-pixel strip does not become a one-pixel forearm',async()=>{
+ const {reconstructArm}=await import('./arm-reconstruction.js');const l=layer('arm',0,0,160,140,()=>false),visible=new Uint8ClampedArray(l.data.length);
+ for(let x=25;x<125;x++)visible.set([160,95,60,255],(100*160+x)*4);
+ const p=reconstructArm(l,visible,[{x:130,y:20},{x:130,y:100},{x:25,y:100}]);
+ let thickness=0;for(let y=0;y<140;y++)if(p.data[(y*160+75)*4+3]>128)thickness++;
+ assert.ok(thickness>=20,`hidden forearm thickness: ${thickness}`);
+});
