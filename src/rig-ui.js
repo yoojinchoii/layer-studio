@@ -1,3 +1,4 @@
+import {armFillSignature} from './arm-reconstruction.js';
 import {restoreArmChains,mergedArmIndices,startArmSplit,setHandOutline,validateArmSplits} from './arm-separation.js';
 import {reviewPose,repairPoseBindings,enableFullBody} from './pose-review.js';
 import {applyBuiltin} from './rig-templates.js';
@@ -31,7 +32,7 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   const message=text=>{$('rigStatus').textContent=text;};
   let spinePreview,features;const dirty=()=>{cached=null;cachedParts=null;spinePreview?.changed();state.onEdited?.();if($('rigAuditSummary').textContent){$('rigAuditSummary').textContent='작업이 변경됐어요. 점검을 다시 실행해주세요.';$('rigAuditResults').replaceChildren();}};
   const assist=()=>state.server?.rigAssist?state.server:null;
-  const fillKey=()=>JSON.stringify([project.hiddenKey,project.rig.points,project.rig.limbStyle,project.rig.modes,project.rig.sleeves,$('rigStrength').value,project.removed]);
+  const fillKey=()=>JSON.stringify([project.hiddenKey,armFillSignature(project.rig),$('rigStrength').value,project.removed]);
   async function call(path,body,type){const server=assist();const r=await fetch(server.url+path,{method:'POST',headers:{Authorization:`Bearer ${server.token}`,'Content-Type':type},body,signal:AbortSignal.timeout(300000)});if(!r.ok){let e;try{e=await r.json();}catch{}throw Error(e?.detail||`서버 오류 (${r.status})`);}return r.json();}
   // AI joints: pose keypoints from the server, then centred on the actual limb pixels.
   async function detectJoints(){if(!assist()||!project)return false;message('AI로 관절 위치를 찾는 중…');const data=await call('/api/pose',await canvasBlob(state.original),'application/octet-stream');const layers=project.layers.map((l,i)=>({...project.meta[i],data:pixels(l.canvas)}));const n=applyPose(project.rig,data.keypoints);if(!n){message('AI가 관절을 찾지 못해 모양 기반 추정을 사용합니다.');return false;}centerJoints(project.rig,layers);attachProps(project.rig,layers);dirty();fields();status();message(`AI가 관절 ${n}개를 찾았어요. 점이 어긋나면 드래그로 고쳐주세요.`);return true;}
@@ -53,9 +54,9 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
           for(let i=0;i<m.mask.length;i++)if(m.mask[i]){img.data[i*4]=rgb[i*4];img.data[i*4+1]=rgb[i*4+1];img.data[i*4+2]=rgb[i*4+2];}ctx.putImageData(img,0,0);project.layers[m.i]={...l,canvas:c};}}}
     project.hiddenKey=key;dirty();
   }
-  async function redraw(){if(!assist())throw Error('다시 그리기는 서버 연결 후 사용할 수 있어요.');await redrawHidden();const key=fillKey();if(project.fill?.key===key)return;cachedParts=null;const todo=parts().filter(p=>p.fill);if(!todo.length){draw();message('가려진 부분을 AI로 다시 그렸어요.');return;}message(`AI가 관절 이음새 ${todo.length}곳을 다시 그리는 중…`);
+  async function redraw(armsOnly=false){if(!assist())throw Error('다시 그리기는 서버 연결 후 사용할 수 있어요.');if(!armsOnly)await redrawHidden();const key=fillKey();if(project.fill?.key===key)return;cachedParts=null;const todo=parts().filter(p=>p.fill&&(!armsOnly||p.reconstruction));if(!todo.length){draw();message('가려진 부분을 AI로 다시 그렸어요.');return;}message(`AI가 관절 이음새 ${todo.length}곳을 다시 그리는 중…`);
     const items=[];for(const p of todo)items.push({image:await b64(await canvasBlob(p.canvas)),mask:await b64(await canvasBlob(maskCanvas(p.fill,p.width,p.height)))});
-    const res=await call('/api/inpaint',JSON.stringify({items}),'application/json'),images={};
+    const res=await call('/api/inpaint',JSON.stringify({items}),'application/json'),images=project.fill?.key===key?{...project.fill.images}:{};
     for(const [k,p]of todo.entries()){const bitmap=await createImageBitmap(new Blob([Uint8Array.from(atob(res.images[k]),c=>c.charCodeAt(0))],{type:'image/png'}));const c=canvas(p.width,p.height);c.getContext('2d').drawImage(bitmap,0,0);bitmap.close();images[p.slot]=c.getContext('2d').getImageData(0,0,p.width,p.height).data;}
     project.fill={key,images};dirty();draw();status();message('가려진 부분과 관절 이음새를 AI로 다시 그렸어요.');}
   const pushHistory=(stack,value)=>{stack.push(value);if(stack.length>40)stack.shift();};
@@ -100,6 +101,10 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   }
   function handFields(){
     const side=$('rigArmSide').value,cfg=project?.rig.armSplits?.[Number($('rigLayer').value)],drawing=!!handSelection;
+    const ready=!!cfg?.hands?.left&&!!cfg?.hands?.right;
+    $('rigArmRestore').disabled=!ready||drawing||processing;
+    $('rigArmRestoreNote').textContent=!ready?'오른손·왼손을 모두 지정하면 가려진 팔 복원을 시작할 수 있어요.':cfg.reconstruct?(project.fill?.key===fillKey()?'팔 복원 그림이 저장되어 있어요. 양팔을 움직여 경계를 확인하세요.':'팔 모양 초안입니다. AI로 질감을 채우려면 아래 버튼을 누르세요.'):'손 아래에 가려졌던 팔 모양과 질감을 만듭니다. 원본에서 보이지 않는 부분은 추정이므로 동작을 보고 확인해주세요.';
+    $('rigArmRestoreWidth').value=String(cfg?.widthScale||1);
     $('rigArmPaintSide').value=side;$('rigHandActions').hidden=!drawing;$('rigHandApply').disabled=!drawing||handSelection.points.length<3;
     $('rigHandBack').disabled=!drawing||!handSelection.points.length;$('rigHandClear').hidden=!cfg?.hands?.[side]||drawing;
     $('rigHandStart').disabled=drawing;$('rigPlay').disabled=drawing||!!armGuide;$('rigArmSide').disabled=drawing||!!armGuide;$('rigArmGuideSelected').disabled=drawing||!!armGuide;
@@ -113,7 +118,9 @@ export function installRigUI({state,canvas,canvasBlob,download,toast,render}){
   $('rigHandBack').onclick=()=>{handSelection?.points.pop();handFields();draw();};
   $('rigHandCancel').onclick=()=>{cancelHandSelection();draw();message('손 지정 취소 · 기존 파츠는 그대로 유지됩니다.');};
   $('rigHandApply').onclick=()=>{if(!handSelection)return;const before=JSON.stringify(project.rig),{index,side,points}=handSelection;try{setHandOutline(project.rig,reviewLayers(),index,side,points);pushHistory(history,before);future=[];initializeControls(project.rig);cancelHandSelection();dirty();menus(`wrist_${side}`);$('rigShowArmRegions').checked=true;draw();message('지정한 손을 별도 파츠로 떼어 이 팔의 손목에만 연결했어요. 반대쪽 손도 확인해주세요.');}catch(e){project.rig=JSON.parse(before);message(e.message);}};
-  $('rigHandClear').onclick=()=>{const cfg=project.rig.armSplits?.[Number($('rigLayer').value)];if(!cfg?.hands)return;remember();delete cfg.hands[$('rigArmSide').value];dirty();binding();message('선택한 손 지정을 해제했어요. 이 영역은 팔 자동 분리 초안으로 돌아갑니다.');};
+  $('rigHandClear').onclick=()=>{const cfg=project.rig.armSplits?.[Number($('rigLayer').value)];if(!cfg?.hands)return;remember();delete cfg.hands[$('rigArmSide').value];dirty();binding();message('손 지정이 해제되어 자동 추정 상태입니다. 이 손을 다시 지정해야 팔 복원을 할 수 있어요.');};
+  $('rigArmRestoreWidth').onchange=()=>{const c=project.rig.armSplits?.[Number($('rigLayer').value)];if(!c)return;stop();remember();c.widthScale=Number($('rigArmRestoreWidth').value);dirty();handFields();draw();};
+  $('rigArmRestore').onclick=async()=>{if(processing)return;const c=project.rig.armSplits?.[Number($('rigLayer').value)];if(!c?.hands?.left||!c?.hands?.right)return;stop();remember();c.reconstruct=true;dirty();draw();processing=true;handFields();try{await redraw(true);message('손 소속과 가려진 팔 복원 적용 · 모션 재생으로 양팔의 연결과 그림을 확인해주세요.');}catch(e){message(`팔 모양 초안만 적용됐어요. AI 질감 복원 실패: ${e.message}`);}finally{processing=false;handFields();}};
   $('rigArmFront').onchange=$('rigArmBias').onchange=()=>{const i=Number($('rigLayer').value),cfg=project.rig.armSplits?.[i];if(!cfg)return;stop();remember();cfg.front=$('rigArmFront').value;cfg.bias=Number($('rigArmBias').value);dirty();binding();};
   $('rigArmSplitReset').onclick=()=>{cancelHandSelection();const i=Number($('rigLayer').value);stop();remember();project.rig.modes[i]='crossed_arms';project.rig.assignments[i]='chest';delete project.rig.armSplits[i];$('rigArmPaint').checked=false;dirty();menus();$('rigLayer').value=String(i);binding();message('양팔을 원본 한 파츠로 되돌렸어요. 관절 위치는 유지됩니다.');};
   $('rigShowArmRegions').onchange=()=>draw();$('rigArmPaint').onchange=()=>{cancelHandSelection();stop();if($('rigArmPaint').checked){$('rigMode').value='setup';$('rigShowArmRegions').checked=true;cancelArmGuide();fields();}draw();};
@@ -340,7 +347,7 @@ Spine에서는 해당 IK의 Mix가 1일 때 빨간 ik_ 뼈대를 움직이고, 0
     const map=ids.map(id=>old.indexOf(id));
     if(map.some((v,i)=>v!==i)){
       project.rig.assignments=map.map(i=>project.rig.assignments[i]);project.rig.modes=map.map(i=>project.rig.modes[i]);
-      for(const key of ['partBones','sleeves'])if(project.rig[key])project.rig[key]=Object.fromEntries(map.flatMap((old,i)=>project.rig[key][old]!==undefined?[[i,project.rig[key][old]]]:[]));
+      for(const key of ['partBones','sleeves','armSplits'])if(project.rig[key])project.rig[key]=Object.fromEntries(map.flatMap((old,i)=>project.rig[key][old]!==undefined?[[i,project.rig[key][old]]]:[]));
       project.source=map.map(i=>project.source[i]);
     }
     const meta=state.layers.map(metadata);if(JSON.stringify(meta)!==JSON.stringify(project.meta)||map.some((v,i)=>v!==i)){cached=null;cachedParts=null;}

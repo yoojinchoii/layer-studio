@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=hands-11">
+<link rel="stylesheet" href="/style.css?v=arms-12">
 </head>
 <body>
 <header class="topbar">
@@ -17,7 +17,7 @@
     <span class="chip" id="fileTag">준비</span>
   </div>
   <div class="header-actions">
-    <span class="chip" id="appVersion">손·팔 연결 11</span>
+    <span class="chip" id="appVersion">가려진 팔 복원 12</span>
     <button class="button ghost" id="helpBtn"><i data-lucide="circle-help"></i><span>사용 가이드</span></button>
     <button class="button ghost connection-btn" id="connectionBtn"><i data-lucide="plug-zap"></i><span>서버 연결</span></button>
   </div>
@@ -412,10 +412,14 @@
               <button id="rigHandStart" class="button primary full">손 테두리 지정하기</button>
               <p id="rigHandProgress" class="field-note" role="status" aria-live="polite"></p>
               <div id="rigHandActions" hidden><button id="rigHandApply" class="button primary full">이 손을 선택한 팔에 붙이기</button><div class="button-pair"><button id="rigHandBack" class="button outlined">마지막 점 취소</button><button id="rigHandCancel" class="button subtle">취소</button></div></div>
-              <button id="rigHandClear" class="button subtle full" hidden>선택한 손 지정 해제</button>
+
+            </div>
+            <div class="arm-step"><h4>4. 가려진 팔 복원</h4><p id="rigArmRestoreNote" class="field-note" role="status"></p>
+              <button id="rigArmRestore" class="button primary full">양팔의 가려진 부분 복원 · AI</button>
+              <p class="field-note">전체 레이어를 다시 분리하지 않습니다. 연결된 서버의 인페인팅을 사용하므로 서버 사용량은 발생합니다.</p>
             </div>
             <label class="switch-row"><span>팔별 색상 보기 · 주황 / 파랑</span><input id="rigShowArmRegions" type="checkbox"></label>
-            <p class="field-note">색은 편집 표시입니다. 저장 이미지에는 들어가지 않아요. 팔을 크게 벌릴 때 필요한 가려진 그림은 별도 복원해야 합니다.</p>
+            <p class="field-note">색은 편집 표시입니다. 저장 이미지에는 들어가지 않아요. 손의 소속을 지정한 뒤 4번에서 가려진 팔을 복원하세요.</p>
             <details class="fold"><summary>팔 영역을 더 고치기</summary><div class="fold-body">
               <p class="field-note">손 지정 전에도 팔 영역 초안을 만들 수 있어요. 가까운 관절을 기준으로 나누므로 정확한 자동 인식 결과는 아닙니다.</p>
               <button id="rigArmSplitStart" class="button outlined full">팔 영역 초안 만들기</button>
@@ -423,7 +427,7 @@
               <select id="rigArmPaintSide" hidden aria-label="칠할 팔 영역"><option value="left">오른팔(R)</option><option value="right">왼팔(L)</option></select>
               <label class="field-label" for="rigArmRadius">칠하기 크기</label><input id="rigArmRadius" type="range" min="2" max="40" step="1" value="8">
               <p class="field-note">지정한 손은 보호됩니다. 손 경계는 위의 ‘손 테두리 지정하기’로 다시 그려주세요.</p>
-              <label class="field-label" for="rigArmFront">겹치는 손 영역의 우선순위</label><select id="rigArmFront"><option value="left">주황 오른손 먼저</option><option value="right">파랑 왼손 먼저</option></select>
+              <label class="field-label" for="rigArmRestoreWidth">복원할 팔 두께</label><input id="rigArmRestoreWidth" type="range" min="0.5" max="2" value="1" step="0.05"><p class="field-note">두께나 관절을 바꾸면 AI 복원을 다시 적용해주세요.</p><button id="rigHandClear" class="button subtle full" hidden>선택한 손 지정 삭제 · 자동 추정으로 되돌리기</button><label class="field-label" for="rigArmFront">앞에 놓을 팔</label><select id="rigArmFront"><option value="left">주황 오른팔 먼저</option><option value="right">파랑 왼팔 먼저</option></select>
               <label class="field-label" for="rigArmBias">자동으로 나눈 팔 경계 조절</label><input id="rigArmBias" type="range" min="-30" max="30" value="0" step="1">
               <button id="rigArmSplitReset" class="button subtle full">손·팔 분리 취소 · 원본으로</button>
             </div></details>
@@ -535,6 +539,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=hands-11"></script>
+<script type="module" src="/app.js?v=arms-12"></script>
 </body>
 </html>

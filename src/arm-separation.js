@@ -1,3 +1,4 @@
+import {reconstructArm} from './arm-reconstruction.js';
 import {mergedArmRoots} from './part-identity.js';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 export const armIds=side=>['arm','elbow','wrist'].map(j=>`${j}_${side}`);
@@ -23,9 +24,10 @@ export function startArmSplit(rig,layers,index){
  if(rig.sleeves)delete rig.sleeves[index];if(rig.partBones)delete rig.partBones[index];return true;
 }
 function dist(p,a,b){const dx=b.x-a.x,dy=b.y-a.y,t=clamp(((p.x-a.x)*dx+(p.y-a.y)*dy)/(dx*dx+dy*dy||1),0,1);return Math.hypot(p.x-a.x-t*dx,p.y-a.y-t*dy);}
-function crop(l,data,side,hand=false){let x0=l.width,y0=l.height,x1=-1,y1=-1;for(let y=0;y<l.height;y++)for(let x=0;x<l.width;x++)if(data[(y*l.width+x)*4+3]){x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);}if(x1<0)return null;
+function crop(l,data,side,hand=false,fill=null){let x0=l.width,y0=l.height,x1=-1,y1=-1;for(let y=0;y<l.height;y++)for(let x=0;x<l.width;x++)if(data[(y*l.width+x)*4+3]){x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);}if(x1<0)return null;
  const width=x1-x0+1,height=y1-y0+1,out=new Uint8ClampedArray(width*height*4);for(let y=0;y<height;y++)out.set(data.subarray(((y+y0)*l.width+x0)*4,((y+y0)*l.width+x1+1)*4),y*width*4);
- return {...l,canvas:null,data:out,x:l.x+x0,y:l.y+y0,width,height,name:`${hand?'hand':'handwear'}_${side==='left'?'R':'L'}`,bone:`${hand?'wrist':'arm'}_${side}`,mode:hand?'rigid':`arm_${side}`,role:hand?'separated-hand':'separated-arm',armSide:side,allowedBones:hand?[`wrist_${side}`]:armIds(side)};
+ const mask=fill?new Uint8Array(width*height):null;if(mask)for(let y=0;y<height;y++)mask.set(fill.subarray((y+y0)*l.width+x0,(y+y0)*l.width+x1+1),y*width);
+ return {...l,canvas:null,data:out,...(mask?{fill:mask}:{}),x:l.x+x0,y:l.y+y0,width,height,name:`${hand?'hand':'handwear'}_${side==='left'?'R':'L'}`,bone:`${hand?'wrist':'arm'}_${side}`,mode:hand?'rigid':`arm_${side}`,role:hand?'separated-hand':'separated-arm',armSide:side,allowedBones:hand?[`wrist_${side}`]:armIds(side)};
 }
 // Lossless visible-pixel ownership; never mirror one arm or invent hidden anatomy.
 // Brushes override the geometric proposal. Every input pixel belongs to one side only.
@@ -44,7 +46,14 @@ export function separateArms(layer,rig,index){
   let target=owner[k];for(const side of [cfg.front==='left'?'right':'left',cfg.front])if(cfg.hands?.[side]&&insidePolygon(p,cfg.hands[side]))target=2+sides.indexOf(side);
   out[target].set(layer.data.subarray(k*4,k*4+4),k*4);
  }
- const parts=out.map((data,i)=>crop(layer,data,sides[i%2],i>=2)).filter(Boolean);return parts.sort((a,b)=>(a.armSide===cfg.front?-1:1)-(b.armSide===cfg.front?-1:1));
+ const parts=out.map((data,i)=>crop(layer,data,sides[i%2],i>=2)).filter(Boolean);
+ // All hands are above all arms. Crossed hands can cover the opposite upper arm.
+ parts.sort((a,b)=>(a.role==='separated-hand'?0:1)-(b.role==='separated-hand'?0:1)||(a.armSide===cfg.front?-1:1)-(b.armSide===cfg.front?-1:1));
+ if(cfg.reconstruct&&sides.every(s=>cfg.hands?.[s]))for(let i=0;i<2;i++){
+  const restored=reconstructArm(layer,out[i],chains[i],cfg.widthScale||1);if(!restored)continue;
+  const p=crop(layer,restored.data,sides[i],false,restored.fill);if(p){p.name+='_hidden';p.reconstruction=true;parts.push(p);}
+ }
+ return parts;
 }
 export function insidePolygon(p,points){let inside=false;for(let i=0,j=points.length-1;i<points.length;j=i++){const a=points[i],b=points[j];if((a.y>p.y)!==(b.y>p.y)&&p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x)inside=!inside;}return inside;}
 export function setHandOutline(rig,layers,index,side,points){
@@ -57,5 +66,5 @@ export function setHandOutline(rig,layers,index,side,points){
 }
 export function validateArmSplits(rig,count){
  if(rig.armSplits===undefined)return;const obj=rig.armSplits;if(!obj||typeof obj!=='object'||Array.isArray(obj))throw Error('양팔 분리 설정을 확인해주세요.');
- for(const [i,c]of Object.entries(obj)){if(!/^\d+$/.test(i)||Number(i)>=count||!c||!['left','right'].includes(c.front)||!Number.isFinite(c.bias)||Math.abs(c.bias)>80||!Array.isArray(c.strokes)||c.strokes.length>2000)throw Error('양팔 분리 설정을 확인해주세요.');if(c.hands!==undefined){if(!c.hands||typeof c.hands!=='object'||Array.isArray(c.hands))throw Error('손 영역을 확인해주세요.');for(const [side,ps]of Object.entries(c.hands))if(!['left','right'].includes(side)||!Array.isArray(ps)||ps.length<3||ps.length>80||ps.some(p=>!p||![p.x,p.y].every(Number.isFinite)||p.x<0||p.y<0||p.x>rig.width||p.y>rig.height))throw Error('손 영역을 확인해주세요.');}for(const s of c.strokes)if(!s||!['left','right'].includes(s.side)||![s.x,s.y,s.radius].every(Number.isFinite)||s.x<0||s.y<0||s.x>rig.width||s.y>rig.height||s.radius<1||s.radius>100)throw Error('팔 영역 브러시 값을 확인해주세요.');}
+ for(const [i,c]of Object.entries(obj)){if(!/^\d+$/.test(i)||Number(i)>=count||!c||!['left','right'].includes(c.front)||!Number.isFinite(c.bias)||Math.abs(c.bias)>80||!Array.isArray(c.strokes)||c.strokes.length>2000)throw Error('양팔 분리 설정을 확인해주세요.');if(c.reconstruct!==undefined&&typeof c.reconstruct!=='boolean'||c.widthScale!==undefined&&(!Number.isFinite(c.widthScale)||c.widthScale<.5||c.widthScale>2))throw Error('팔 복원 설정을 확인해주세요.');if(c.hands!==undefined){if(!c.hands||typeof c.hands!=='object'||Array.isArray(c.hands))throw Error('손 영역을 확인해주세요.');for(const [side,ps]of Object.entries(c.hands))if(!['left','right'].includes(side)||!Array.isArray(ps)||ps.length<3||ps.length>80||ps.some(p=>!p||![p.x,p.y].every(Number.isFinite)||p.x<0||p.y<0||p.x>rig.width||p.y>rig.height))throw Error('손 영역을 확인해주세요.');}for(const s of c.strokes)if(!s||!['left','right'].includes(s.side)||![s.x,s.y,s.radius].every(Number.isFinite)||s.x<0||s.y<0||s.x>rig.width||s.y>rig.height||s.radius<1||s.radius>100)throw Error('팔 영역 브러시 값을 확인해주세요.');}
 }

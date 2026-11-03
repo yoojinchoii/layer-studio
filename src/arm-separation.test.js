@@ -25,3 +25,20 @@ test('explicit crossed hand outline overrides the nearer opposite arm and binds 
  const before=JSON.stringify(r);assert.throws(()=>setHandOutline(r,ls,2,'right',[{x:0,y:0},{x:5,y:0},{x:5,y:5}]));assert.equal(JSON.stringify(r),before);
  saved.armSplits[2].hands.left[0].x=Infinity;assert.throws(()=>validateArmSplits(saved,ls.length));
 });
+
+test('reconstruction adds masked support behind visible arms and hands, and survives save/reload',async()=>{
+ const {setHandOutline}=await import('./arm-separation.js');const {armFillSignature}=await import('./arm-reconstruction.js');
+ const ls=fixture(),r=applyBuiltin('half',ls,200,250).rig;startArmSplit(r,ls,2);
+ r.points.arm_left={x:35,y:95};r.points.elbow_left={x:40,y:150};r.points.wrist_left={x:150,y:150};r.points.arm_right={x:165,y:95};r.points.elbow_right={x:160,y:155};r.points.wrist_right={x:50,y:140};
+ setHandOutline(r,ls,2,'left',[{x:145,y:130},{x:178,y:130},{x:178,y:155},{x:145,y:155}]);
+ setHandOutline(r,ls,2,'right',[{x:22,y:130},{x:55,y:130},{x:55,y:155},{x:22,y:155}]);
+ const before=separateArms(ls[2],r,2),key=armFillSignature(r);r.armSplits[2].reconstruct=true;
+ const after=separateArms(ls[2],r,2),supports=after.filter(p=>p.reconstruction);
+ assert.equal(supports.length,2);assert.notEqual(armFillSignature(r),key);
+ assert.deepEqual(after.filter(p=>!p.reconstruction),before,'visible pixels and hand ownership unchanged');
+ assert.ok(after.slice(0,2).every(p=>p.role==='separated-hand'),'both hands above both arms');
+ for(const p of supports){assert.equal(p.fill.length,p.width*p.height);assert.ok(p.fill.some((v,i)=>v&&p.data[i*4+3]>0),'inpaint has actual alpha to restore');assert.deepEqual(p.allowedBones,p.armSide==='left'?['arm_left','elbow_left','wrist_left']:['arm_right','elbow_right','wrist_right']);}
+ const copy=JSON.parse(JSON.stringify(r));validateArmSplits(copy,ls.length);assert.deepEqual(separateArms(ls[2],copy,2),after);
+ copy.armSplits[2].hands.left[0].x++;assert.notEqual(armFillSignature(copy),armFillSignature(r));
+ copy.armSplits[2].widthScale=Infinity;assert.throws(()=>validateArmSplits(copy,ls.length));
+});
