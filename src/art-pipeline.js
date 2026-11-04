@@ -7,7 +7,8 @@ export function normalizeReport(input){
   const report=structuredClone(input);
   report.issues=Array.isArray(report.issues)?report.issues.slice(0,30).map(i=>({code:String(i.code||''),message:String(i.message||'').slice(0,500),part:i.part?String(i.part).slice(0,120):null})):[];
   const checks=report.stages.slice(0,5).every(s=>s.status==='passed');
-  report.rig_allowed=input.rig_allowed===true&&checks&&['art_passed','rig_passed','rig_review'].includes(input.status);
+  const manual=report.manual_review?.source==='user'&&report.manual_review?.parts===true&&report.manual_review?.assembly===true;
+  report.rig_allowed=input.rig_allowed===true&&(checks||manual)&&['art_passed','rig_passed','rig_review'].includes(input.status);
   return report;
 }
 export function artAllowsRig(report){return normalizeReport(report)?.rig_allowed===true;}
@@ -15,7 +16,11 @@ export function psdDelivery(report){
   const review=!!report&&!artAllowsRig(report);
   return {autoDownload:!review,suffix:review?'-검토용-분리원본.psd':'-parts.psd',title:review?'검토용 PSD · 복원 검사 미통과':'레이어 PSD 준비 완료'};
 }
-export function invalidateArt(report){return report?{...report,status:'needs_review',rig_allowed:false,issues:[...(report.issues||[]).filter(i=>i.code!=='edited'),{code:'edited',message:'파츠 위치·순서·표시·이미지가 바뀌어 이전 검사가 무효화됐습니다. 재검사해주세요.'}],stages:report.stages.map(s=>['structure','materials','rig'].includes(s.id)?{...s,status:'pending',detail:'파츠 변경 후 재검사 필요'}:s)}:null;}
+export function invalidateArt(report){return report?{...report,manual_review:null,status:'needs_review',rig_allowed:false,issues:[...(report.issues||[]).filter(i=>i.code!=='edited'),{code:'edited',message:'파츠가 바뀌었습니다. 파츠 확대와 원본 비교 후 확인하거나 서버 재검사를 실행해주세요.'}],stages:report.stages.map(s=>['structure','materials','rig'].includes(s.id)?{...s,status:'pending',detail:'파츠 변경 후 재검사 필요'}:s)}:null;}
+export function manuallyReviewArt(input){
+ const report=normalizeReport(input);if(!report)throw Error('검사 기록을 확인할 수 없습니다.');
+ return {...report,status:'art_passed',rig_allowed:true,manual_review:{source:'user',parts:true,assembly:true,at:new Date().toISOString()},stages:report.stages.map(s=>s.id==='rig'?{...s,status:'pending',detail:'사용자 그림 확인 후 동작 검사 대기'}:s)};
+}
 export function exportAllowed(report){return !report||artAllowsRig(report)&&report.status==='rig_passed';}
 export function completeRigReview(report,audit){
   if(!artAllowsRig(report))throw Error('파츠 검사를 먼저 통과해야 합니다.');
@@ -46,13 +51,15 @@ export function installArtReport({state,retry,download}){
   function render(){
     root.hidden=!state.pipeline;
     if(!state.pipeline)return;
-    const p=state.pipeline;document.getElementById('artPipelineTitle').textContent=({running:'분석·복원 진행 중',needs_review:'파츠 확인 필요 · 자동 리깅 중단',art_passed:'파츠 검사 통과 · 동작 검사 대기',rig_review:'리깅 동작 확인 필요',rig_passed:'자동 검사 통과 · 모션을 확인하세요'})[p.status]||'파츠 검사 기록';
+    const p=state.pipeline;document.getElementById('artPipelineTitle').textContent=p.manual_review?'사용자가 그림 확인 · 자동 검사 기록은 아래에 유지':({running:'분석·복원 진행 중',needs_review:'파츠 확인 필요 · 자동 리깅 중단',art_passed:'파츠 검사 통과 · 동작 검사 대기',rig_review:'리깅 동작 확인 필요',rig_passed:'자동 검사 통과 · 모션을 확인하세요'})[p.status]||'파츠 검사 기록';
     const list=document.getElementById('artStages');list.replaceChildren();
     for(const s of p.stages||[]){const li=document.createElement('li');li.dataset.status=s.status;li.textContent=`${s.label} · ${names[s.status]||'미확인'}`;li.title=s.detail||'';list.append(li);}
     const issues=[...(p.issues||[]),...(p.rig_review?.issues||[]).map(i=>({message:`${i.part}: ${i.message}`}))];
     document.getElementById('artIssues').replaceChildren(...issues.slice(0,12).map(i=>{const li=document.createElement('li');li.textContent=i.message;return li;}));
     document.getElementById('artRetry').disabled=state.busy||!state.server?.artPipeline||state.layers.length<2;
     document.getElementById('artCandidateSave').hidden=!state.artCandidate;
+    document.getElementById('manualArtReview').hidden=p.status!=='needs_review';
+    document.getElementById('manualArtConfirm').disabled=state.busy||!document.getElementById('manualPartsChecked').checked||!document.getElementById('manualAssemblyChecked').checked;
     document.getElementById('artRawHint').textContent=p.status==='needs_review'?'원본/분리 결과를 유지했습니다. 후보 PSD는 확인용이며 자동 적용되지 않습니다.':'자동 검사는 드로잉 완료 판정이 아닙니다. 오른쪽 「파츠 펼쳐보기」와 리깅 모션에서 실제 그림을 확인하세요.';
   }
   document.getElementById('artRetry').onclick=retry;

@@ -1,6 +1,11 @@
 import {test} from 'node:test';import assert from 'node:assert/strict';
 import {normalizeReport,artAllowsRig,exportAllowed,completeRigReview,applyArtBindings,ART_STAGES} from './art-pipeline.js';
 const report=()=>({version:'art-pipeline-1',status:'art_passed',rig_allowed:true,stages:ART_STAGES.map(id=>({id,status:id==='rig'?'pending':'passed'})),analysis:{joints:{wrist_R:[900,500]}}});
+test('explicit manual review retains automatic failures and is revoked by any artwork edit',async()=>{
+ const {manuallyReviewArt,invalidateArt}=await import('./art-pipeline.js');const failed=report();failed.status='needs_review';failed.rig_allowed=false;failed.stages[3].status='review';failed.issues=[{code:'shape',message:'shape mismatch'}];
+ const reviewed=manuallyReviewArt(failed);assert.equal(artAllowsRig(reviewed),true);assert.equal(reviewed.stages[3].status,'review');assert.equal(reviewed.issues[0].code,'shape');assert.equal(exportAllowed(reviewed),false);
+ const invalid=invalidateArt(reviewed);assert.equal(invalid.manual_review,null);assert.equal(artAllowsRig(invalid),false);
+});
 test('failed artwork is never automatically delivered as a finished PSD',async()=>{
   const {psdDelivery}=await import('./art-pipeline.js');const p=report();p.stages[4].status='review';
   assert.equal(psdDelivery(p).autoDownload,false);assert.match(psdDelivery(p).suffix,/검토용/);

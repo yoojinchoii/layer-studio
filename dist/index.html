@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="/style.css?v=art-quality-16">
+<link rel="stylesheet" href="/style.css?v=art-quality-17">
 </head>
 <body>
 <header class="topbar">
@@ -17,7 +17,7 @@
     <span class="chip" id="fileTag">준비</span>
   </div>
   <div class="header-actions">
-    <span class="chip" id="appVersion">파츠 드로잉 검수 16</span>
+    <span class="chip" id="appVersion">파츠 편집·모션 검수 17</span>
     <button class="button ghost" id="helpBtn"><i data-lucide="circle-help"></i><span>사용 가이드</span></button>
     <button class="button ghost connection-btn" id="connectionBtn"><i data-lucide="plug-zap"></i><span>서버 연결</span></button>
   </div>
@@ -37,7 +37,7 @@
       <div class="link-row">
         <button class="text-btn" id="sampleBtn"><i data-lucide="sparkles"></i>테스트 이미지 선택</button>
         <button class="text-btn" id="rigDemo">분리된 샘플로 관절 편집</button>
-        <button class="text-btn" id="redrawDemo">드로잉 보정 예제 열기 · AI 사용 없음</button>
+        <button class="text-btn" id="redrawDemo">수정 예제 17 열기 · AI 사용 없음</button>
       </div>
       <label class="field-label" for="frameHint">리깅 구도</label>
       <select id="frameHint"><option value="auto">자동 · 파츠에서 판단</option><option value="full">전신</option><option value="half">상반신</option><option value="bust">흉상 · 얼굴 전용</option></select>
@@ -77,6 +77,12 @@
         <button id="artRetry" class="button secondary">저장된 파츠로 분석·복원 재검사</button>
         <p class="field-note">See-through 분리는 반복하지 않습니다. 구조 분석·복원 GPU 사용량은 발생합니다.</p>
         <button id="artCandidateSave" class="button secondary" hidden>검토용 복원 후보 PSD</button>
+        <details id="manualArtReview" class="fold" hidden><summary>직접 수정한 파츠로 리깅 이어가기</summary><div class="fold-body">
+          <p class="field-note">AI 재실행 없이 진행합니다. 자동 검사 실패 기록은 유지되며, 아래 확인은 사용자의 그림 검수로 기록됩니다.</p>
+          <label class="check-row"><input id="manualPartsChecked" type="checkbox"> 파츠를 따로 보고 구멍·잔여 손·옷 조각을 확인했어요</label>
+          <label class="check-row"><input id="manualAssemblyChecked" type="checkbox"> 원본과 비교해 좌우 소속·겹침·옷 형태를 확인했어요</label>
+          <button id="manualArtConfirm" class="button outlined full" disabled>그림 확인 완료 · 리깅 편집</button>
+        </div></details>
         <button id="artReportSave" class="button subtle">검사 기록 저장</button>
       </section>
       <button id="stopBtn" class="button subtle full hidden">대기 중단</button>
@@ -172,6 +178,7 @@
     </div>
     <section class="layer-detail hidden" id="layerDetail">
       <button id="inspectParts" class="button outlined full">파츠 펼쳐보기 · 확대 검수</button>
+      <button id="editArtwork" class="button outlined full">선택 파츠 그림 수정</button>
       <div class="detail-title">선택한 레이어</div>
       <label class="field-label" for="layerName">이름</label>
       <input id="layerName" maxlength="80">
@@ -272,6 +279,12 @@
         </div>
       </div>
       <p id="rigMotionHint" class="rig-motion-note" aria-live="polite"></p>
+      <div class="rig-inspection-tools">
+        <label>재생 속도 <select id="rigPlaybackSpeed"><option value="0.25">0.25배</option><option value="0.5">0.5배</option><option value="1" selected>1배</option></select></label>
+        <label class="rig-scrubber">모션 구간 <input id="rigScrub" type="range" min="0" max="999" value="0" aria-label="모션 구간 탐색"><output id="rigScrubValue">0%</output></label>
+        <button id="rigReturnPose" class="button subtle">편집 포즈로 돌아가기</button>
+        <label>원본 비교 <select id="rigReferenceView"><option value="off">끄기</option><option value="overlay">50% 겹쳐보기</option><option value="original">원본만</option></select></label>
+      </div>
       <div class="rig-preview checker"><canvas id="rigCanvas" tabindex="0" aria-label="관절 위치 편집 미리보기. 점을 드래그하거나 방향키로 이동"></canvas></div>
       <div class="rig-viewbar">
         <label class="check-chip"><input id="rigShowBones" type="checkbox" checked> 관절 표시</label>
@@ -554,6 +567,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="/app.js?v=art-quality-16"></script>
+<script type="module" src="/app.js?v=art-quality-17"></script>
 </body>
 </html>
