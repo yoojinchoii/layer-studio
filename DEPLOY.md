@@ -29,11 +29,12 @@ gh run watch -R yoojinchoii/layer-studio   # 배포 진행 보기
 - **허용 주소.** 사이트 주소가 바뀌면 두 곳을 같이 고칩니다.
   - 서버: `../layer-studio-server/http_api.py`의 `PAGES_ORIGIN` → `../.venv/bin/modal deploy modal_app.py`
   - 연결 프로그램: `../spine-bridge/bridge.py`의 `SITE`, `ORIGINS` → 아래 방법으로 압축 다시 만들기
-- **연결 프로그램 압축.** 웹앱을 바꾸면 `../spine-bridge/studio/`에 `dist/`의 `index.html, app.js, local-engine-worker.js, style.css`, 샘플·데모 파일을 복사하고 `dist/spine-bridge-mac.zip`을 다시 만들어 함께 올립니다(폴더 이름 `Layer Studio Spine 연결/`, `.command`는 실행 권한).
+- **연결 프로그램 압축.** 웹앱을 바꾸면 `npm run build` 뒤 `python3 scripts/sync-bridge.py`로 `../spine-bridge/studio/`와 `dist/spine-bridge-mac.zip`을 함께 갱신해서 올립니다.
 
 ## 기록
 
 | 날짜 | 내용 |
 | --- | --- |
+| 2026-11-06 | 가려진 곳 채우기 확장(감싸인 자리 전체), 파츠 안 무늬 조각 정리, 팔짱은 양팔 한 장(`handwear`, 가슴 고정), 턱 관절 피부폭 보정 |
 | 2026-11-06 | GitHub Pages로 이전. 절대 경로 → 상대 경로. 서버·연결 프로그램에 새 주소 허용 추가(옛 주소도 유지) |
 | 2026-11-05 | 자체 알고리즘 엔진(`src/local-engine/`) 추가, 기본 엔진으로 지정 |

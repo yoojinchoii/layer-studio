@@ -47,6 +47,22 @@ function bboxOf(mask, w, h) {
   return x1 < 0 ? null : { x: x0, y: y0, width: x1 - x0 + 1, height: y1 - y0 + 1 };
 }
 
+/** 마스크가 같은 줄 좌우 또는 같은 열 위아래에서 감싸는 빈 자리 (마스크 자신은 제외). */
+export function enclosedBy(mask, w, h) {
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    let first = -1, last = -1;
+    for (let x = 0; x < w; x++) if (mask[y * w + x]) { if (first < 0) first = x; last = x; }
+    for (let x = first + 1; x < last; x++) if (!mask[y * w + x]) out[y * w + x] = 1;
+  }
+  for (let x = 0; x < w; x++) {
+    let first = -1, last = -1;
+    for (let y = 0; y < h; y++) if (mask[y * w + x]) { if (first < 0) first = y; last = y; }
+    for (let y = first + 1; y < last; y++) if (!mask[y * w + x]) out[y * w + x] = 1;
+  }
+  return out;
+}
+
 /** 8방향 연결 덩어리. */
 function components(mask, w, h) {
   const label = new Int32Array(w * h);
@@ -292,7 +308,7 @@ export function faceDetails(data, w, h, faceMask, lineMask) {
 const ORDER = [
   'front_hair', 'eyebrow_r', 'eyebrow_l', 'eyelash_r', 'eyelash_l', 'irides_r', 'irides_l', 'eyewhite_r', 'eyewhite_l',
   'mouth', 'nose', 'face',
-  'sleeve_r', 'sleeve_l', 'arm_r', 'arm_l', 'topwear', 'bottomwear', 'neck',
+  'handwear', 'sleeve_r', 'sleeve_l', 'arm_r', 'arm_l', 'topwear', 'bottomwear', 'neck',
   'footwear_r', 'footwear_l', 'legwear_r', 'legwear_l', 'back_hair',
 ];
 
@@ -370,6 +386,17 @@ export function buildLayers(data, w, h, seg, rig, partsResult) {
   for (const s of ['r', 'l']) add(`arm_${s}`, near(`arm_${s}`, [`sleeve_${s}`], H * 0.035));
   add('bottomwear', near('bottomwear', ['topwear'], H * 0.03));
   for (const s of ['r', 'l']) add(`legwear_${s}`, near(`legwear_${s}`, ['bottomwear', `footwear_${s}`], H * 0.06));
+
+  // 2-2) 감싸인 곳: 뒤 파츠가 같은 줄의 좌우 또는 같은 열의 위아래에서 감싸는 자리를 앞 파츠가 덮고 있으면
+  //      크기와 상관없이 채운다 (팔짱 낀 팔 밑 가슴, 머리카락 가닥 밑 얼굴, 손 밑 앞치마 등).
+  //      덮는 쪽은 그리기 순서상 앞에 있는 파츠만, 비어 있는 배경은 채우지 않는다.
+  const bodyOrder = ORDER.filter((n) => mask[n] && !/^(eye|irides|eyebrow|mouth|nose|back_hair)/.test(n));
+  for (let k = 1; k < bodyOrder.length; k++) {
+    const back = bodyOrder[k];
+    const fronts = or(...bodyOrder.slice(0, k).map(get));
+    const enclosed = and(enclosedBy(get(back), w, h), fronts);
+    if (count(enclosed)) add(back, enclosed);
+  }
 
   // 3) 레이어 픽셀 (채우기는 원본이 완전히 불투명한 곳 밑에만: 반투명 외곽선 밑을 채우면 밖으로 비친다)
   const opaque = new Uint8Array(w * h);
