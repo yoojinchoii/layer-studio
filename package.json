@@ -1,1 +1,18 @@
-{"name":"layer-studio","private":true,"type":"module","scripts":{"build":"esbuild src/app.js --bundle --format=esm --alias:util=./src/browser-util.js --outfile=dist/app.js --minify","check":"node --check src/app.js"},"dependencies":{"ag-psd":"^30.0.0","fflate":"^0.8.2","lucide":"^0.468.0"},"devDependencies":{"esbuild":"^0.25.0"}}
+{
+  "name": "layer-studio",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "esbuild src/app.js --bundle --format=esm --alias:util=./src/browser-util.js --outfile=dist/app.js --minify && esbuild src/local-engine/worker.js --bundle --format=esm --outfile=dist/local-engine-worker.js --minify",
+    "check": "node --check src/app.js",
+    "test": "node --test src/*.test.js"
+  },
+  "dependencies": {
+    "ag-psd": "^30.0.0",
+    "fflate": "^0.8.2",
+    "lucide": "^0.468.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}
