@@ -40,9 +40,9 @@ function render(){if(state.pipeline){const stamp=artStamp();if(state.artStamp&&s
 function renderLayers(){if(!state.layers.length)return;$('layerList').replaceChildren();for(const l of state.layers){const item=document.createElement('div');item.className=`layer-item${l.id===state.selected?' selected':''}${l.visible?'':' off'}`;item.tabIndex=0;item.setAttribute('role','button');item.setAttribute('aria-label',`${l.name} 선택`);item.setAttribute('aria-pressed',String(l.id===state.selected));const vis=document.createElement('button');vis.className='icon-button';vis.setAttribute('aria-label',`${l.name} ${l.visible?'숨기기':'표시하기'}`);const icon=document.createElement('i');icon.dataset.lucide=l.visible?'eye':'eye-off';vis.append(icon);vis.onclick=e=>{e.stopPropagation();l.visible=!l.visible;render();};const img=document.createElement('img');img.className='layer-thumb';const thumb=canvas(64,64);const scale=Math.min(64/l.canvas.width,64/l.canvas.height);thumb.getContext('2d').drawImage(l.canvas,(64-l.canvas.width*scale)/2,(64-l.canvas.height*scale)/2,l.canvas.width*scale,l.canvas.height*scale);img.src=thumb.toDataURL();img.alt='';const label=document.createElement('span');label.className='layer-name';label.textContent=l.name;label.title=l.name;item.append(vis,img,label);item.onclick=()=>{state.selected=l.id;renderLayers();};item.onkeydown=e=>{if(e.target!==item)return;if(e.key==='Enter'||e.key===' '){e.preventDefault();state.selected=l.id;renderLayers();}};$('layerList').append(item);}const l=selected();$('layerDetail').classList.toggle('hidden',!l);if(l){$('layerName').value=l.name;$('opacity').value=Math.round(l.opacity*100);$('opacityValue').textContent=`${Math.round(l.opacity*100)}%`;const index=state.layers.indexOf(l);$('moveUp').disabled=index===0;$('moveDown').disabled=index===state.layers.length-1;}icons();}
 async function loadSource(file){if(state.busy)return;if(file.size>10*1024*1024){toast('이미지는 10MB 이하로 선택해주세요.');return;}if(!['image/png','image/jpeg','image/webp'].includes(file.type)){toast('PNG, JPG, WebP 이미지를 선택해주세요.');return;}setBusy(true,'이미지 불러오는 중');try{const c=await imageCanvas(file);commitProject((file.name||'캐릭터 이미지').replace(/\.[^.]+$/,''),c,[layer('원본 · 미분리',snapshot(c))],'원본 이미지');toast(state.server?'원본을 불러왔어요. AI 레이어 분리를 눌러 시작하세요.':'원본을 불러왔어요. 오른쪽 위에서 서버 연결 상태를 확인해주세요.');}catch(e){toast(e.message);}finally{setBusy(false);$('imageInput').value='';}}
 const sampleImages={
-  full:{name:'전신',path:'/sample-character.png',template:'전신'},
-  half:{name:'상반신',path:'/sample-half-body.png',template:'반신 · 보이는 팔까지'},
-  bust:{name:'흉상',path:'/sample-bust.png',template:'흉상 · 얼굴·목·어깨'}
+  full:{name:'전신',path:'./sample-character.png',template:'전신'},
+  half:{name:'상반신',path:'./sample-half-body.png',template:'반신 · 보이는 팔까지'},
+  bust:{name:'흉상',path:'./sample-bust.png',template:'흉상 · 얼굴·목·어깨'}
 };
 function openSamples(){if(state.busy||rigUI?.isProcessing())return;$('sampleDialog').showModal();}
 async function loadSample(key){
@@ -124,7 +124,7 @@ $('artCandidateSave').onclick=async()=>{if(!state.artCandidate||state.busy)retur
 rigUI=installRigUI({state,canvas,canvasBlob,download,toast,render});
 rigUI.update();
 
-$('rigDemo').onclick=async()=>{if(state.busy)return;setBusy(true,'분리된 샘플 불러오는 중');try{const response=await fetch('/rig-demo.json');if(!response.ok)throw Error('예제를 불러오지 못했어요.');const data=await response.json();const layers=[];for(const l of data.layers){const c=await imageCanvas(new Blob([Uint8Array.from(atob(l.image_b64),c=>c.charCodeAt(0))],{type:'image/png'}));layers.push(layer(l.label,c,l.x,l.y));}const original=canvas(data.width,data.height);for(const l of [...layers].reverse())original.getContext('2d').drawImage(l.canvas,l.x,l.y);commitProject('관절 편집 테스트 캐릭터',original,layers,'분리된 예제',null,'full');}catch(e){toast(e.message);}finally{setBusy(false);}if(state.layers.length>1){setBusy(true,'샘플 파츠 보정과 PSD 정리');try{await finishSeparation();}catch(e){toast(`PSD 준비 실패: ${e.message}`);}finally{setBusy(false);await recovery?.flush();}}};
+$('rigDemo').onclick=async()=>{if(state.busy)return;setBusy(true,'분리된 샘플 불러오는 중');try{const response=await fetch('./rig-demo.json');if(!response.ok)throw Error('예제를 불러오지 못했어요.');const data=await response.json();const layers=[];for(const l of data.layers){const c=await imageCanvas(new Blob([Uint8Array.from(atob(l.image_b64),c=>c.charCodeAt(0))],{type:'image/png'}));layers.push(layer(l.label,c,l.x,l.y));}const original=canvas(data.width,data.height);for(const l of [...layers].reverse())original.getContext('2d').drawImage(l.canvas,l.x,l.y);commitProject('관절 편집 테스트 캐릭터',original,layers,'분리된 예제',null,'full');}catch(e){toast(e.message);}finally{setBusy(false);}if(state.layers.length>1){setBusy(true,'샘플 파츠 보정과 PSD 정리');try{await finishSeparation();}catch(e){toast(`PSD 준비 실패: ${e.message}`);}finally{setBusy(false);await recovery?.flush();}}};
 
 connectionUI=installConnectionUI({state,updateRun,updateEngine,toast});
 updateRun();
@@ -150,7 +150,7 @@ $('rigProjectInput').onchange=async e=>{try{const file=e.target.files[0];if(!fil
 $('redrawDemo').onclick=async()=>{
   if(state.busy||rigUI.isProcessing())return;
   setBusy(true,'재드로잉 예제 불러오기','저장된 파츠와 관절을 불러옵니다. AI를 실행하지 않습니다.');
-  try{await recovery.flush();const response=await fetch('/redraw-demo-17.json');if(!response.ok)throw Error('보정 예제를 불러오지 못했습니다.');
+  try{await recovery.flush();const response=await fetch('./redraw-demo-17.json');if(!response.ok)throw Error('보정 예제를 불러오지 못했습니다.');
     await restoreWorkspace({id:crypto.randomUUID(),snapshot:await response.json()});recovery.changed();
     toast('개별 재드로잉한 검수 예제입니다. 새 이미지의 서버 자동 결과와는 구분해주세요.');
   }catch(error){toast(error.message);}finally{setBusy(false);}
