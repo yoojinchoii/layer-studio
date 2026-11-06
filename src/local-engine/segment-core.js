@@ -10,6 +10,12 @@ export const DEFAULT_PARAMS = Object.freeze({
   gapRadius: 1, // 끊긴 선을 메우는 닫힘 연산 반경 (px), 0이면 끔
   colorTolerance: 14, // 한 영역으로 묶는 색 허용 오차 (ΔE, 영역 평균 기준)
   minArea: 40, // 이보다 작은 영역은 이웃 영역에 흡수 (px)
+  style: 'auto', // 'auto' | 'cel'(셀 채색) | 'painted'(페인팅·3D 렌더)
+  paintedK90: 25, // 전경 90%를 덮는 데 영역이 이보다 많이 필요하면 페인팅으로 본다
+  paintedLightness: 0.3, // 페인팅: 밝기 차이 가중치 (음영은 밝기만 바뀌므로 낮게)
+  paintedTolerance: 12, // 페인팅: 영역 합치기 평균색 허용 오차 (밝기 가중 ΔE)
+  paintedEdge: 5, // 페인팅: 경계에서 이웃 픽셀 색 차이 평균이 이보다 작아야(부드러운 음영) 합침
+  paintedMinFraction: 0.0003, // 페인팅: 전경 대비 이보다 작은 잡티는 이웃에 합침
 });
 
 const SRGB_TO_LINEAR = new Float32Array(256);
@@ -202,7 +208,7 @@ export function closeGaps(mask, w, h, radius) {
  * 장벽(선화·배경)에 막히고, 영역 평균색과 허용 오차 이내인 픽셀만 한 영역으로 묶는다.
  * 반환 라벨: 0 = 미배정, 1.. = 영역.
  */
-export function floodRegions(lab, fg, barrier, w, h, colorTolerance) {
+export function floodRegions(lab, fg, barrier, w, h, colorTolerance, lightWeight = 1) {
   const n = w * h;
   const labels = new Int32Array(n);
   const queue = new Int32Array(n);
@@ -221,7 +227,7 @@ export function floodRegions(lab, fg, barrier, w, h, colorTolerance) {
     queue[tail++] = start;
     const tryAdd = (j) => {
       if (labels[j] || !fg[j] || barrier[j]) return;
-      const dl = lab[j * 3] - sumL / count;
+      const dl = (lab[j * 3] - sumL / count) * lightWeight;
       const da = lab[j * 3 + 1] - sumA / count;
       const db = lab[j * 3 + 2] - sumB / count;
       if (dl * dl + da * da + db * db > tol2) return;
@@ -341,6 +347,128 @@ export function summarizeRegions(labels, data, w, h, count) {
   }));
 }
 
+/** 전경 90%를 덮는 데 필요한 영역 수 (작을수록 큰 면으로 칠한 셀 채색). */
+export function coverCount(labels, count, fraction = 0.9) {
+  const area = new Int32Array(count + 1);
+  let total = 0;
+  for (let i = 0; i < labels.length; i++) if (labels[i]) { area[labels[i]]++; total++; }
+  const sorted = Array.from(area.subarray(1)).sort((a, b) => b - a);
+  let acc = 0;
+  for (let k = 0; k < sorted.length; k++) { acc += sorted[k]; if (acc >= total * fraction) return k + 1; }
+  return sorted.length;
+}
+
+/**
+ * 페인팅용 영역 합치기. 두 이웃 영역은 (1) 맞닿은 경계에서 이웃 픽셀끼리 색 차이가 작고(부드러운 음영)
+ * (2) 평균색이 밝기를 덜 본 거리로 가까울 때만 합친다. 재질 경계(피부|머리카락)는 경계가 또렷해서 남는다.
+ * 매우 작은 조각만 가장 비슷한 이웃에 강제로 합친다. labels를 1..K로 다시 매기고 K를 돌려준다.
+ */
+export function mergeRegions(labels, lab, w, h, count, { lightWeight = 0.3, tol = 16, edgeTol = 6, minArea = 0, fg = null } = {}) {
+  const parent = new Int32Array(count + 1);
+  for (let i = 0; i <= count; i++) parent[i] = i;
+  const find = (x) => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+  const sum = new Float64Array((count + 1) * 4);
+  for (let i = 0; i < labels.length; i++) {
+    const r = labels[i];
+    if (!r) continue;
+    sum[r * 4] += lab[i * 3]; sum[r * 4 + 1] += lab[i * 3 + 1]; sum[r * 4 + 2] += lab[i * 3 + 2]; sum[r * 4 + 3]++;
+  }
+  // 원래 영역 쌍마다 경계 픽셀 수와 경계 색 차이 합
+  const N = count + 1;
+  const edgeN = new Map();
+  const edgeD = new Map();
+  const pixelDist = (i, j) => Math.hypot(lab[i * 3] - lab[j * 3], lab[i * 3 + 1] - lab[j * 3 + 1], lab[i * 3 + 2] - lab[j * 3 + 2]);
+  const link = (i, j) => {
+    const a = labels[i], b = labels[j];
+    if (!a || !b || a === b) return;
+    const k = a < b ? a * N + b : b * N + a;
+    edgeN.set(k, (edgeN.get(k) || 0) + 1);
+    edgeD.set(k, (edgeD.get(k) || 0) + pixelDist(i, j));
+  };
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (x < w - 1) link(i, i + 1);
+      if (y < h - 1) link(i, i + w);
+    }
+  }
+  const pairs = [...edgeN.keys()].map((k) => [Math.floor(k / N), k % N, edgeN.get(k), edgeD.get(k)]);
+  const dist = (a, b) => {
+    const na = sum[a * 4 + 3], nb = sum[b * 4 + 3];
+    const dl = (sum[a * 4] / na - sum[b * 4] / nb) * lightWeight;
+    const da = sum[a * 4 + 1] / na - sum[b * 4 + 1] / nb;
+    const db = sum[a * 4 + 2] / na - sum[b * 4 + 2] / nb;
+    return Math.sqrt(dl * dl + da * da + db * db);
+  };
+  const unite = (a, b) => { parent[b] = a; for (let c = 0; c < 4; c++) sum[a * 4 + c] += sum[b * 4 + c]; };
+  // 1) 부드러운 경계 + 비슷한 색: 합쳐진 덩어리 기준으로 경계를 다시 모아 반복
+  for (let pass = 0; pass < 8; pass++) {
+    const agg = new Map();
+    for (const [a0, b0, n, d] of pairs) {
+      const a = find(a0), b = find(b0);
+      if (a === b) continue;
+      const k = a < b ? a * N + b : b * N + a;
+      const e = agg.get(k) || [0, 0];
+      e[0] += n; e[1] += d;
+      agg.set(k, e);
+    }
+    const scored = [];
+    for (const [k, [n, d]] of agg) {
+      const a = Math.floor(k / N), b = k % N;
+      const edge = d / n;
+      if (edge > edgeTol || n < 3) continue;
+      const c = dist(a, b);
+      // 경계가 아주 매끄러우면(같은 면이 어두워지며 채도도 같이 바뀌는 음영) 평균색 차이를 더 봐준다.
+      if (c <= tol || (edge <= edgeTol * 0.5 && c <= tol * 2)) scored.push([edge + c * 0.25, a, b]);
+    }
+    if (!scored.length) break;
+    scored.sort((x, y) => x[0] - y[0]);
+    const touched = new Set();
+    let merged = 0;
+    for (const [, a, b] of scored) {
+      if (touched.has(a) || touched.has(b)) continue; // 한 번에 한 쌍씩: 연쇄로 번지는 것 방지
+      touched.add(a); touched.add(b);
+      if (sum[a * 4 + 3] >= sum[b * 4 + 3]) unite(a, b); else unite(b, a);
+      merged++;
+    }
+    if (!merged) break;
+  }
+  // 2) 아주 작은 조각(잡티)만 가장 비슷한 이웃에
+  if (minArea > 0) {
+    for (let pass = 0; pass < 4; pass++) {
+      let merged = 0;
+      const best = new Map();
+      for (const [a0, b0] of pairs) {
+        const a = find(a0), b = find(b0);
+        if (a === b) continue;
+        for (const [s1, s2] of [[a, b], [b, a]]) {
+          if (sum[s1 * 4 + 3] >= minArea) continue;
+          const d = dist(s1, s2);
+          const cur = best.get(s1);
+          if (!cur || d < cur[0]) best.set(s1, [d, s2]);
+        }
+      }
+      for (const [small, [, other]] of best) {
+        const a = find(small), b = find(other);
+        if (a === b || sum[a * 4 + 3] >= minArea) continue;
+        unite(b, a);
+        merged++;
+      }
+      if (!merged) break;
+    }
+  }
+  const remap = new Int32Array(count + 1);
+  let next = 0;
+  for (let i = 0; i < labels.length; i++) {
+    const r = labels[i];
+    if (!r) continue;
+    const root = find(r);
+    if (!remap[root]) remap[root] = ++next;
+    labels[i] = remap[root];
+  }
+  return next;
+}
+
 /** 전체 파이프라인. 단계별 소요 시간(ms)도 함께 돌려준다. */
 export function segment(data, w, h, params = {}) {
   const p = { ...DEFAULT_PARAMS, ...params };
@@ -362,10 +490,20 @@ export function segment(data, w, h, params = {}) {
   lap('lines');
   const closed = closeGaps(line, w, h, p.gapRadius);
   lap('gaps');
-  const { labels, count } = floodRegions(lab, fg, closed, w, h, p.colorTolerance);
+  let { labels, count } = floodRegions(lab, fg, closed, w, h, p.colorTolerance);
   lap('flood');
-  const total = absorbUnassigned(labels, fg, w, h, count, p.minArea);
+  let total = absorbUnassigned(labels, fg, w, h, count, p.minArea);
   lap('absorb');
+  // 그림체: 큰 면 몇 개로 대부분이 덮이면 셀 채색, 음영 때문에 잘게 쪼개지면 페인팅·3D 렌더.
+  const k90 = coverCount(labels, total);
+  const style = p.style === 'auto' ? (k90 > p.paintedK90 ? 'painted' : 'cel') : p.style;
+  if (style === 'painted') {
+    // 셀 채색과 같은 분할(음영 띠로 잘게 쪼개짐) 위에서, 경계가 부드러운 이웃끼리만 합친다.
+    let fgCount0 = 0;
+    for (let i = 0; i < n; i++) fgCount0 += fg[i];
+    total = mergeRegions(labels, lab, w, h, total, { lightWeight: p.paintedLightness, tol: p.paintedTolerance, edgeTol: p.paintedEdge, minArea: fgCount0 * p.paintedMinFraction });
+    lap('painted');
+  }
   const regions = summarizeRegions(labels, data, w, h, total);
   lap('summary');
 
@@ -381,6 +519,8 @@ export function segment(data, w, h, params = {}) {
     width: w,
     height: h,
     params: p,
+    style,
+    k90,
     backgroundMethod: method,
     fg,
     line,

@@ -96,6 +96,73 @@ function withHelperPoints(points) {
  * - 그 밖에는 픽셀 단위로 나눈다 (예: 소매가 이어진 상의 → 몸통 + 양 소매).
  */
 /**
+ * 얼굴 영역 찾기: 머리카락 관절~목 관절 사이 몸 중심선이 지나는 영역 중, 색이 확연히 다른 작은 영역
+ * (눈·입·눈썹)을 가장 많이 품은 영역. 머리카락 하이라이트는 머리와 색상이 같아 세지 않는다.
+ * 후보가 없으면 예전처럼 머리카락~턱 관절 60% 지점의 영역.
+ */
+export function findFaceRegion(seg, rig) {
+  const P = rig.points;
+  if (!P.hair || !P.head) return -1;
+  const { width: w, height: h, labels, regions } = seg;
+  const fallback = () => {
+    const x = Math.round((P.hair.x + P.head.x) / 2);
+    const y = Math.round(P.hair.y + (P.head.y - P.hair.y) * 0.6);
+    return x >= 0 && y >= 0 && x < w && y < h ? labels[y * w + x] : -1;
+  };
+  // 셀 채색은 관절이 정확해서 한 점으로 충분하고 검증도 끝났다. 페인팅에서만 훑어서 찾는다.
+  if (seg.style !== 'painted') return fallback();
+  const cx = Math.round((P.hair.x + P.head.x) / 2);
+  const yEnd = Math.min(h - 1, Math.round((P.neck || P.head).y));
+  const candidates = new Set();
+  for (let y = Math.max(0, Math.round(P.hair.y)); y <= yEnd; y++) {
+    for (const dx of [-6, 0, 6]) {
+      const x = cx + dx;
+      if (x >= 0 && x < w && labels[y * w + x]) candidates.add(labels[y * w + x]);
+    }
+  }
+  if (!candidates.size) return fallback();
+  // 영역마다 가장 많이 맞닿은 이웃과 그 비율
+  const R = regions.length;
+  const touch = new Map();
+  const total = new Int32Array(R + 1);
+  const add = (a, b) => {
+    if (!a || !b || a === b) return;
+    total[a]++;
+    const k = a * (R + 1) + b;
+    touch.set(k, (touch.get(k) || 0) + 1);
+  };
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (x < w - 1) { add(labels[i], labels[i + 1]); add(labels[i + 1], labels[i]); }
+      if (y < h - 1) { add(labels[i], labels[i + w]); add(labels[i + w], labels[i]); }
+    }
+  }
+  const host = new Int32Array(R + 1);
+  const hostShare = new Float32Array(R + 1);
+  for (const [k, n] of touch) {
+    const a = Math.floor(k / (R + 1));
+    const b = k % (R + 1);
+    const share = n / total[a];
+    if (share > hostShare[a]) { hostShare[a] = share; host[a] = b; }
+  }
+  const hueDiff = (c1, c2) => Math.hypot(c1[0] - c2[0], c1[1] - c2[1], c1[2] - c2[2]);
+  let best = -1;
+  let bestScore = 0;
+  for (const r of candidates) {
+    const reg = regions[r - 1];
+    let score = 0;
+    for (const q of regions) {
+      if (host[q.id] !== r || hostShare[q.id] < 0.7 || q.area > reg.area * 0.2) continue;
+      if (hueDiff(q.color, reg.color) < 60) continue; // 하이라이트·음영 같은 같은 계열 색은 제외
+      score++;
+    }
+    if (score > bestScore || (score === bestScore && score > 0 && reg.area > regions[best - 1].area)) { best = r; bestScore = score; }
+  }
+  return bestScore >= 2 ? best : fallback();
+}
+
+/**
  * 턱 관절을 얼굴 피부색으로 다시 잡는다. 긴 머리가 목을 가리면 실루엣이 목에서 가늘어지지 않아
  * 골격만으로는 턱이 눈높이에 놓이기 때문이다. 얼굴 피부 폭이 가장 넓은 줄 아래에서 60% 밑으로
  * 줄어드는 곳을 턱으로 본다. rig.points를 직접 고친다(head, neck, hair).
@@ -108,29 +175,30 @@ export function refineHeadJoints(seg, rig) {
   for (let i = 0; i < fg.length; i++) if (fg[i]) { const x = i % w, y = (i - x) / w; if (y < y0) y0 = y; if (y > y1) y1 = y; if (x < x0) x0 = x; if (x > x1) x1 = x; }
   const H = y1 - y0 + 1;
   const W = x1 - x0 + 1;
+  const probe = findFaceRegion(seg, rig);
+  if (probe <= 0) return false;
   const px = Math.round((P.hair.x + P.head.x) / 2);
-  const py = Math.round(P.hair.y + (P.head.y - P.hair.y) * 0.6);
-  const probe = labels[py * w + px];
-  if (!probe) return false;
+  // 얼굴 영역 안에서 중심선 위 가장 높은 줄부터 내려간다
+  let py = Math.round(P.hair.y);
+  while (py < h - 1 && labels[py * w + px] !== probe) py++;
   const skin = regions[probe - 1].color;
   const isSkin = new Uint8Array(regions.length + 1);
   for (const r of regions) isSkin[r.id] = Math.hypot(r.color[0] - skin[0], r.color[1] - skin[1], r.color[2] - skin[2]) < 45 ? 1 : 0;
-  const cx = px;
-  const reach = Math.round(W * 0.25);
+  // 줄마다 얼굴(과 같은 피부색) 픽셀 수. 눈·입이 가운데를 끊어도 줄 전체를 세므로 흔들리지 않는다.
+  // 가장 넓은 줄 아래에서 60% 밑으로 줄어든 상태가 3줄 이어지면 그 첫 줄이 턱.
+  const reach = Math.round(W * 0.3);
   let maxWidth = 0;
   let maxY = py;
   let chin = -1;
+  let low = 0;
   for (let y = py; y < Math.min(h, py + H * 0.4); y++) {
-    // 가운데에서 이어진 피부 구간의 폭
-    let x = cx;
-    while (x < Math.min(w - 1, cx + reach) && !isSkin[labels[y * w + x]]) x++;
-    if (!isSkin[labels[y * w + x]]) { if (maxWidth) { chin = y; break; } continue; }
-    let a = x, b = x;
-    while (a > Math.max(0, cx - reach) && isSkin[labels[y * w + a - 1]]) a--;
-    while (b < Math.min(w - 1, cx + reach) && isSkin[labels[y * w + b + 1]]) b++;
-    const width = b - a + 1;
-    if (width > maxWidth) { maxWidth = width; maxY = y; }
-    else if (y > maxY && width < maxWidth * 0.6) { chin = y; break; }
+    let width = 0;
+    for (let x = Math.max(0, px - reach); x < Math.min(w, px + reach); x++) if (isSkin[labels[y * w + x]]) width++;
+    if (width > maxWidth) { maxWidth = width; maxY = y; low = 0; continue; }
+    if (y > maxY && width < maxWidth * 0.6) {
+      low++;
+      if (low >= 3) { chin = y - 2; break; }
+    } else low = 0;
   }
   if (chin < 0 || maxWidth < W * 0.08) return false;
   if (Math.abs(chin - P.head.y) < H * 0.015) return false;
@@ -143,7 +211,8 @@ export function refineHeadJoints(seg, rig) {
 
 export function assignParts(seg, rig, { splitThreshold = 0.9, minShare = 0.05 } = {}) {
   const { width: w, height: h, fg, labels, regions } = seg;
-  refineHeadJoints(seg, rig);
+  // 페인팅·3D 렌더는 긴 머리·음영 때문에 골격 턱 위치가 자주 틀려서 피부 폭으로 다시 잡는다.
+  if (seg.style === 'painted') refineHeadJoints(seg, rig);
   // 양팔을 골격에서 못 찾았으면(팔짱·몸에 붙은 팔) 팔 그룹을 만들지 않는다:
   // 비율로 짐작한 팔 뼈가 머리카락·몸통을 끌어가는 것을 막고, 가슴 위 피부를 'handwear' 한 장으로 묶는다.
   const crossed = (rig.missing || []).includes('arm_left') && (rig.missing || []).includes('arm_right') && rig.frame === 'full';
@@ -165,14 +234,7 @@ export function assignParts(seg, rig, { splitThreshold = 0.9, minShare = 0.05 } 
   const HEAD = gid('head');
 
   // 피부색: 머리카락 관절과 턱 관절 사이(코 근처) 영역의 색.
-  const faceRegion = (() => {
-    const a = rig.points.hair;
-    const b = rig.points.head;
-    if (!a || !b) return -1;
-    const x = Math.round((a.x + b.x) / 2);
-    const y = Math.round(a.y + (b.y - a.y) * 0.6);
-    return x >= 0 && y >= 0 && x < w && y < h ? labels[y * w + x] : -1;
-  })();
+  const faceRegion = findFaceRegion(seg, rig);
   const skinColor = faceRegion > 0 ? regions[faceRegion - 1].color : null;
   const skinLike = (r) => r === faceRegion || (skinColor && colorDistance(regions[r - 1].color, skinColor) < 45);
   const topRegion0 = (() => { for (let i = 0; i < labels.length; i++) if (fg[i]) return labels[i]; return -1; })();
@@ -208,6 +270,8 @@ export function assignParts(seg, rig, { splitThreshold = 0.9, minShare = 0.05 } 
     const share = (g) => votes[r * G + g] / total;
     // 어깨·가슴으로 내려온 긴 머리: 허리 위의 머리색 영역은 통째로 머리카락
     if (hairLike(r) && rig.points.body && regions[r - 1].centroid[1] < rig.points.body.y && ['torso', 'arm_r', 'arm_l', 'neck'].includes(GROUPS[best].id)) { decision[r] = HEAD; continue; }
+    // 다리를 못 찾은 전신(긴 치마·드레스): 다리 그룹에 걸친 영역은 통째로 하의.
+    if ((rig.missing || []).includes('legs') && share(LEG_R) + share(LEG_L) + share(PELVIS) >= 0.5) { decision[r] = PELVIS; continue; }
     if (share(best) >= splitThreshold) decision[r] = best;
     // 양다리에 걸친 옷(반바지·치마)은 통째로 하의.
     else if (share(PELVIS) + share(LEG_R) + share(LEG_L) >= 0.6 && share(LEG_R) >= 0.15 && share(LEG_L) >= 0.15) decision[r] = PELVIS;
