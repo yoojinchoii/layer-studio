@@ -427,16 +427,37 @@ export function fitJoints(fg, w, h) {
       const d = Math.abs((bx - ax) * (ay - py) - (ax - px) * (by - ay)) / chord;
       if (d > bend) { bend = d; s = k; }
     }
-    if (bend < armR) {
+    const bent = bend >= armR;
+    if (!bent) {
       s = 0;
       while (s < n - 1 && dt[limb[s]] > armR * 1.4) s++;
     }
     const len = n - s;
     const wrist = argBy(limb, dt, s + len * 0.65, s + len * 0.9, smaller);
-    const elbow = Math.round((s + wrist) / 2);
-    points[`arm_${side}`] = P(limb[s]);
+    // A포즈의 꺾임점은 팔이 몸통에서 떨어지는 겨드랑이 높이다(반팔이면 소매 끝 = 팔뚝 중간).
+    // 실제 어깨 관절(소매 윗부분 둥근 곳 가운데)은 팔 축을 따라 팔 반지름의 약 1.8배 위에 있다. 어깨 윗선은 넘지 않는다.
+    let shoulder = P(limb[s]);
+    if (bent) {
+      const A = limb[s], Wr = limb[wrist];
+      let ux = ex(A) - ex(Wr), uy = ey(A) - ey(Wr);
+      const ul = Math.hypot(ux, uy) || 1;
+      ux /= ul; uy /= ul;
+      let t = 0;
+      while (t < ul) {
+        const x = Math.round(ex(A) + ux * (t + 1)), y = Math.round(ey(A) + uy * (t + 1));
+        if (x < 0 || y < 0 || x >= sw || y >= sh || !solid[y * sw + x]) break;
+        t++;
+      }
+      const back = Math.max(0, Math.min(t - armR * 2, armR * 1.8, ul * 0.3));
+      shoulder = { x: (ex(A) + ux * back) * f + f / 2, y: (ey(A) + uy * back) * f + f / 2 };
+    }
+    // 팔꿈치: 어깨–손목 가운데에 가장 가까운 팔 골격 점(위팔 ≈ 아래팔).
+    const W2 = P(limb[wrist]), mx = (shoulder.x + W2.x) / 2, my = (shoulder.y + W2.y) / 2;
+    let elbow = Math.round((s + wrist) / 2), bestE = Infinity;
+    for (let k = s; k <= wrist; k++) { const q = P(limb[k]), d = Math.hypot(q.x - mx, q.y - my); if (d < bestE) { bestE = d; elbow = k; } }
+    points[`arm_${side}`] = shoulder;
     points[`elbow_${side}`] = P(limb[elbow]);
-    points[`wrist_${side}`] = P(limb[wrist]);
+    points[`wrist_${side}`] = W2;
     endsOut[`hand_tip_${side}`] = P(hand);
   };
   for (const side of ['left', 'right']) {

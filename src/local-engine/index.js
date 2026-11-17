@@ -88,15 +88,16 @@ export function buildReport({ rig, parts, built, width, height, frame }) {
 }
 
 /**
- * 소매는 위팔 본 하나에 단단히(rigid) 붙인다. 메쉬로 휘게 하면 어깨 쪽 몸통 조각이 눌려 뒤집히기 쉽고,
- * 소매 밑 상의는 이미 채워 두었으므로 팔을 들어도 어깨에 구멍이 생기지 않는다.
+ * 소매는 몸통(chest) → 위팔 메쉬로 붙인다. 어깨 쪽 끝은 몸통에 남고 소매 끝단은 위팔을 따라가서,
+ * 팔을 들어도 소매가 어깨에서 떨어져 돌아 나가지 않는다(통째로 돌리면 소매 윗부분이 바깥으로 튀어나와
+ * 밑의 상의 어깨가 드러났다). 소매가 있는 쪽 상의에는 팔 가중치를 주지 않는다(detachedSleeves).
  */
 function bindingFor(name, rig) {
   const m = name.match(/^sleeve_([rl])$/);
   if (!m) return {};
   const bone = m[1] === 'r' ? 'arm_left' : 'arm_right';
   if (!rig.points[bone]) return {};
-  return { art: { bone, mode: 'rigid', allowed_bones: [bone], role: 'sleeve' } };
+  return { art: { bone, mode: m[1] === 'r' ? 'sleeve_left' : 'sleeve_right', allowed_bones: ['chest', bone], role: 'sleeve' } };
 }
 
 /**

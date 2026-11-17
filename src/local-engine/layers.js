@@ -518,6 +518,20 @@ export function buildLayers(data, w, h, seg, rig, partsResult) {
     ['arm_r', 'sleeve_r'], ['arm_l', 'sleeve_l'], ['legwear_r', 'bottomwear'], ['legwear_l', 'bottomwear'], ['legwear_r', 'footwear_r'], ['legwear_l', 'footwear_l']]) {
     if (mask[back] && mask[front]) moveSeam(back, front);
   }
+  // 2-a) 소매에서 가늘게 뻗어 나간 꼬리(겨드랑이 아래 몸통 옆선 등)는 상의 것이다.
+  //      소매는 위팔과 함께 돌기 때문에 꼬리가 소매에 남으면 상의 옆구리가 톱니처럼 뜯겨 보인다.
+  if (mask.topwear) for (const s of ['r', 'l']) {
+    const sl = visible[`sleeve_${s}`] || mask[`sleeve_${s}`];
+    if (!sl || !count(sl)) continue;
+    const body = and(sl, dilate(erode(sl, w, h, 5), w, h, 6.5));
+    // 가는 꼬리(폭 10px 미만) 중 상의에 붙은 것만
+    const tail = and(minus(sl, body), dilate(mask.topwear, w, h, 10));
+    if (!count(tail)) continue;
+    if (mask[`sleeve_${s}`]) mask[`sleeve_${s}`] = minus(mask[`sleeve_${s}`], tail);
+    if (visible[`sleeve_${s}`]) visible[`sleeve_${s}`] = minus(visible[`sleeve_${s}`], tail);
+    mask.topwear = or(mask.topwear, tail);
+    if (visible.topwear) visible.topwear = or(visible.topwear, tail);
+  }
   const near = (back, fronts, D) => and(or(...fronts.map(get)), dilate(get(back), w, h, D));
   const extend = (back, fronts, maxDepth, opts) => {
     if (!mask[back]) return;
@@ -525,13 +539,77 @@ export function buildLayers(data, w, h, seg, rig, partsResult) {
     if (count(r.target)) add(back, r.target, r.alpha);
   };
   extend('neck', ['face', 'front_hair', 'topwear'], H * 0.08);
-  // 상의: 소매·팔·머리카락이 파고든 오목한 곳만 둥글게 메운다(소매 모양대로 뾰족하게 늘리지 않는다).
+  // 상의 어깨: 소매 밑을 어깨 관절 중심의 둥근 볼로 채운다. 소매는 위팔 뼈와 함께 이 중심으로 돌기 때문에,
+  // 어느 각도로 들어도 소매가 비킨 자리에는 같은 둥근 어깨가 보인다(흐린 페이드 덩어리·잘린 단면 없음).
+  if (mask.topwear) for (const s of ['r', 'l']) {
+    const sleeve = get(`sleeve_${s}`), P = rig.points?.[s === 'r' ? 'arm_left' : 'arm_right'];
+    if (!sleeve || !P || !count(sleeve)) continue;
+    const top = visible.topwear || mask.topwear, seam = and(top, dilate(sleeve, w, h, 1.5));
+    // 반지름 = 어깨 중심 → 겨드랑이(상의·소매 경계의 가장 아래 점). 볼의 경계가 소매 끝단(들쭉날쭉한 선)이 아니라
+    // 매끈한 원호가 되게 한다.
+    let ay = -1, ax = 0;
+    for (let i = 0; i < seam.length; i++) if (seam[i]) { const x = i % w, y = (i - x) / w; if (y > ay) { ay = y; ax = x; } }
+    if (ay < 0) continue;
+    const R = Math.min(Math.hypot(ax - P.x, ay - P.y) + 2, H * 0.12);
+    // 볼이 닿는 소매 자리는 가는 조각을 떼고(열기) 오목한 곳을 메운(닫기) 매끈한 모양으로 제한하고,
+    // 가장자리 1.5px은 반투명으로: 소매가 비켜도 들쭉날쭉한 단면·뾰족한 이가 드러나지 않는다.
+    const bound = and(closeMask(dilate(erode(sleeve, w, h, 3), w, h, 3), w, h, 3), sleeve);
+    const inv = new Uint8Array(w * h);
+    for (let i = 0; i < inv.length; i++) inv[i] = bound[i] ? 0 : 1;
+    const din = distanceTransform(inv, w, h);
+    const target = new Uint8Array(w * h), alpha = new Float32Array(w * h);
+    const x0 = Math.max(0, Math.floor(P.x - R - 1)), x1 = Math.min(w - 1, Math.ceil(P.x + R + 1)), y0 = Math.max(0, Math.floor(P.y - R - 1)), y1 = Math.min(h - 1, Math.ceil(P.y + R + 1));
+    for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+      const i = y * w + x;
+      if (!bound[i] || top[i]) continue;
+      const a = Math.min(clamp01(R + 0.5 - Math.hypot(x + 0.5 - P.x, y + 0.5 - P.y)), clamp01(din[i] / 1.5));
+      if (a <= 0) continue;
+      target[i] = 1; alpha[i] = a;
+    }
+    if (count(target)) add('topwear', target, alpha);
+  }
+  // 상의: 소매·팔·머리카락이 파고든 오목한 곳(어깨 볼과 몸통 옆선 사이 겨드랑이 홈 포함)을 둥글게 메운다.
   if (mask.topwear) {
     const fronts = or(get('sleeve_r'), get('sleeve_l'), get('arm_r'), get('arm_l'), get('front_hair'));
-    add('topwear', or(and(closeMask(visible.topwear || mask.topwear, w, h, H * 0.06), fronts), near('topwear', ['sleeve_r', 'sleeve_l', 'arm_r', 'arm_l', 'front_hair'], 2)));
+    add('topwear', or(and(closeMask(fills.topwear ? or(visible.topwear || mask.topwear, fills.topwear.target) : (visible.topwear || mask.topwear), w, h, H * 0.06), fronts), near('topwear', ['sleeve_r', 'sleeve_l', 'arm_r', 'arm_l', 'front_hair'], 2)));
   }
-  // 상의 어깨 끝도 소매 밑으로 조금 둥글게 이어서, 팔을 들어도 세로로 잘린 단면이 보이지 않게
-  extend('topwear', ['sleeve_r', 'sleeve_l'], H * 0.05, { depthScale: 0.6 });
+  // 상의 옆선: 팔이 가리던 몸통 옆선을 겨드랑이와 팔 아래로 드러난 옆선 사이에서 이어 채운다
+  // (팔을 들면 톱니처럼 잘린 상의 가장자리가 보이지 않게).
+  if (mask.topwear && rig.points?.chest) for (const s of ['r', 'l']) {
+    const arm = get(`arm_${s}`);
+    if (!arm || !count(arm)) continue;
+    const T = fills.topwear ? or(visible.topwear || mask.topwear, fills.topwear.target) : (visible.topwear || mask.topwear);
+    const dir = s === 'r' ? -1 : 1, cx = Math.round(rig.points.chest.x);
+    const edge = new Int32Array(h).fill(-1), kind = new Int8Array(h); // 1 = 팔이 가림, 2 = 바깥이 비어 있음
+    for (let y = 0; y < h; y++) {
+      if (!T[y * w + cx]) continue;
+      let x = cx;
+      while (x + dir >= 0 && x + dir < w && T[y * w + x + dir]) x += dir;
+      edge[y] = x;
+      const nx = x + dir;
+      kind[y] = nx >= 0 && nx < w && arm[y * w + nx] ? 1 : !seg.fg[y * w + Math.min(w - 1, Math.max(0, nx))] ? 2 : 0;
+    }
+    const target = new Uint8Array(w * h), alpha = new Float32Array(w * h);
+    for (let y = 1; y < h; y++) {
+      if (kind[y] !== 1 || kind[y - 1] === 1) continue;
+      let y1 = y;
+      while (y1 + 1 < h && kind[y1 + 1] === 1) y1++;
+      const ya = y - 1, yb = y1 + 1;
+      if (yb >= h || kind[yb] !== 2 || edge[ya] < 0 || y1 - y > H * 0.2) { y = y1; continue; }
+      for (let yy = y; yy <= y1; yy++) {
+        const t = (yy - ya) / (yb - ya), ex = edge[ya] + (edge[yb] - edge[ya]) * t;
+        for (let x = edge[yy] + dir; dir < 0 ? x >= Math.floor(ex) - 1 : x <= Math.ceil(ex) + 1; x += dir) {
+          const i = yy * w + x;
+          if (x < 0 || x >= w || !arm[i] || T[i]) continue;
+          const a = clamp01((ex - x) * dir + 0.5);
+          if (a <= 0) continue;
+          target[i] = 1; alpha[i] = a;
+        }
+      }
+      y = y1;
+    }
+    if (count(target)) add('topwear', target, alpha);
+  }
   for (const s of ['r', 'l']) extend(`arm_${s}`, [`sleeve_${s}`], H * 0.09);
   extend('bottomwear', ['topwear'], H * 0.05);
   for (const s of ['r', 'l']) { extend(`legwear_${s}`, ['bottomwear'], H * 0.1); extend(`legwear_${s}`, [`footwear_${s}`], H * 0.05); }
@@ -545,6 +623,14 @@ export function buildLayers(data, w, h, seg, rig, partsResult) {
     const fronts = or(...bodyOrder.slice(0, k).map(get));
     const enclosed = and(enclosedBy(get(back), w, h), fronts);
     if (count(enclosed)) add(back, enclosed);
+  }
+
+  // 2-3) 상의 채움의 가는 조각(폭 6px 미만: 몸통과 어깨 볼 사이 한두 줄 등)은 뺀다.
+  //      팔을 들면 겨드랑이 밑에 뾰족한 이처럼 드러난다.
+  if (fills.topwear) {
+    const all = or(visible.topwear || mask.topwear, fills.topwear.target);
+    const thin = minus(fills.topwear.target, dilate(erode(all, w, h, 3), w, h, 3.5));
+    if (count(thin)) fills.topwear = { ...fills.topwear, target: minus(fills.topwear.target, thin) };
   }
 
   // 3) 레이어 픽셀 (채우기는 원본이 완전히 불투명한 곳 밑에만: 반투명 외곽선 밑을 채우면 밖으로 비친다)
