@@ -4,6 +4,7 @@ import {faceLabels,faceCandidates,faceWeights,splitFaceLids,facialOffsets} from 
 import {activeIds,activeBone,chainDefs,availableChain,independentArm} from './rig-scope.js';
 import {separateSleeve} from './garment-parts.js';
 import {silhouetteTopology} from './mesh-topology.js';
+import {refinementPoints} from './weight-refine.js';
 import {availableAnimations,demoMotionSpecs} from './rig-demo-motions.js';
 export {animationNames,animationDescriptions,availableAnimations} from './rig-demo-motions.js';
 // Pure pixel/rig operations shared by the browser and artifact verification.
@@ -415,12 +416,20 @@ function meshAxis(size,offset,joints,key){
   const sorted=[...new Set(values.map(round))].sort((a,b)=>a-b).filter((v,i,a)=>i===0||v-a[i-1]>.05);
   return sorted.length<=40?sorted:Array.from({length:40},(_,i)=>sorted[Math.round(i*(sorted.length-1)/39)]);
 }
+export const WEIGHT_REFINE_ROUNDS=2;
 export function buildMesh(layer,rig,mode,bone,setup){
   const guide=weightGuide(layer,rig,mode,bone,layer.x+layer.width/2,layer.y+layer.height/2);
   if(mode==='torso')for(const side of ['left','right']){if(layer.detachedSleeves?.includes(side))continue;const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`];const d=A&&E&&unit(E.x-A.x,E.y-A.y);if(d)guide.joints=[...guide.joints,{id:`arm_${side}`,p:A,dir:d,band:Math.hypot(E.x-A.x,E.y-A.y)*.2}];}
   if(mode==='bottoms')guide.joints=['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?weightGuide(layer,rig,mode,bone,h.x,h.y).joints:[];});
   const extra=mode==='face'?faceCandidates(rig,bone).flatMap(id=>{const p=rig.points[id],r=Math.min(layer.width,layer.height)*(/eye|brow|mouth|nose/.test(id)?.06:.12);return [[p.x-layer.x,p.y-layer.y],...[[r,0],[-r,0],[0,r],[0,-r]].map(([dx,dy])=>[p.x-layer.x+dx,p.y-layer.y+dy])];}):mode==='bottoms'?crotchPoints(layer,rig):[];
-  const topology=silhouetteTopology(layer,guide.joints,rig.meshDensity,extra);
+  // 정점 하나의 웨이트(뼈→값). 관절 띠·옷 규칙은 weightGuide/guideWeights가, 세분화는 weight-refine.js가 맡는다.
+  const weightAt=(lx0,ly0)=>{const x=layer.x+lx0,y=layer.y+ly0;
+    const g=mode==='bottoms'||mode==='legs'||mode==='feet'?weightGuide(layer,rig,mode,bone,x,y):guide;
+    const weights=mode==='face'?faceWeights(layer,rig,bone,x,y):mode==='bottoms'?crotchWeights(rig,g,guideWeights(g,x,y),x):mode==='torso'?shirtWeights(g,guideWeights({...g,joints:g.joints.filter(j=>!/^arm_/.test(j.id))},x,y),x,y,rig,layer.detachedSleeves):guideWeights(g,x,y);const bound=new Map();for(const [id,w]of weights){const b=activeBone(rig,id);bound.set(b,(bound.get(b)||0)+w);}return bound;};
+  let topology=silhouetteTopology(layer,guide.joints,rig.meshDensity,extra);
+  // 웨이트가 크게 바뀌는 긴 변에 정점을 더 넣어 관절을 가로지르는 큰 삼각형을 없앤다(얼굴·단단한 파츠 제외).
+  const rounds=rig.weightRefine??WEIGHT_REFINE_ROUNDS;
+  if(topology&&mode!=='face'&&mode!=='rigid')for(let r=0,added=[];r<rounds;r++){const more=refinementPoints(topology.points,topology.triangles,weightAt,{minEdge:Math.max(6,Math.min(layer.width,layer.height)*.06)});if(!more.length)break;added=[...added,...more];const next=silhouetteTopology(layer,guide.joints,rig.meshDensity,[...extra,...added]);if(!next||next.points.length===topology.points.length)break;topology=next;}
   const xs=meshAxis(layer.width,layer.x,guide.joints,'x'),ys=meshAxis(layer.height,layer.y,guide.joints,'y');
   const nx=xs.length-1,ny=ys.length-1,grid=[],lookup=new Map(),root=rig.points.root;
   const add=(x,y)=>{const key=`${x},${y}`;if(!lookup.has(key)){lookup.set(key,grid.length);grid.push([x,y]);}};
@@ -428,11 +437,10 @@ export function buildMesh(layer,rig,mode,bone,setup){
   for(let y=1;y<ny;y++)for(let x=1;x<nx;x++)add(x,y);
   const coords=topology?.points||grid.map(([x,y])=>[xs[x],ys[y]]),uvs=[],vertices=[],triangles=topology?.triangles||[];
   if(topology)hull=topology.hull;
-  for(const [lx0,ly0]of coords){const x=layer.x+lx0,y=layer.y+ly0;uvs.push(lx0/layer.width,ly0/layer.height);
-    const g=mode==='bottoms'||mode==='legs'||mode==='feet'?weightGuide(layer,rig,mode,bone,x,y):guide;
-    const weights=mode==='face'?faceWeights(layer,rig,bone,x,y):mode==='bottoms'?crotchWeights(rig,g,guideWeights(g,x,y),x):mode==='torso'?shirtWeights(g,guideWeights({...g,joints:g.joints.filter(j=>!/^arm_/.test(j.id))},x,y),x,y,rig,layer.detachedSleeves):guideWeights(g,x,y);const bound=new Map();for(const [id,w]of weights){const b=activeBone(rig,id);bound.set(b,(bound.get(b)||0)+w);}vertices.push(bound.size);
-    for(const [b,w]of bound){const [lx,ly]=toLocal(setup.world,b,x-root.x,root.y-y);vertices.push(setup.order.indexOf(b),round(lx),round(ly),w);}}
   if(!topology)for(let y=0;y<ny;y++)for(let x=0;x<nx;x++){const a=lookup.get(`${x},${y}`),b=lookup.get(`${x+1},${y}`),c=lookup.get(`${x},${y+1}`),d=lookup.get(`${x+1},${y+1}`);triangles.push(a,c,b,b,c,d);}
+  const bounds=coords.map(([lx0,ly0])=>{uvs.push(lx0/layer.width,ly0/layer.height);return weightAt(lx0,ly0);});
+  coords.forEach(([lx0,ly0],k)=>{const x=layer.x+lx0,y=layer.y+ly0,bound=bounds[k];vertices.push(bound.size);
+    for(const [b,w]of bound){const [lx,ly]=toLocal(setup.world,b,x-root.x,root.y-y);vertices.push(setup.order.indexOf(b),round(lx),round(ly),w);}});
   const pairs=new Set(),edges=[];for(let i=0;i<triangles.length;i+=3)for(const [a,b]of [[triangles[i],triangles[i+1]],[triangles[i+1],triangles[i+2]],[triangles[i+2],triangles[i]]]){const key=`${Math.min(a,b)},${Math.max(a,b)}`;if(!pairs.has(key)){pairs.add(key);edges.push(a*2,b*2);}}
   return {type:'mesh',uvs,vertices,triangles,hull,edges,width:layer.width,height:layer.height};
 }

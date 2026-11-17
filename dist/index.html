@@ -48,8 +48,16 @@
     <section class="step">
       <header class="step-head"><span class="step-no">2</span><h2>AI 레이어 분리</h2></header>
       <label class="field-label" for="engine">분리 엔진</label>
-      <select id="engine"><option value="local-algo" selected>자체 알고리즘 · 서버·AI 없음</option><option value="see-through">See-through</option><option value="qwen-layered">Qwen Image Layered</option></select>
+      <select id="engine"><option value="flare" selected>flare AI 분리 · AI Proxy 토큰 필요</option><option value="local-algo">자체 알고리즘 · 서버·AI 없음</option><option value="see-through">See-through</option><option value="qwen-layered">Qwen Image Layered</option></select>
       <p class="field-note" id="engineNote">서버·AI 없이 선화·색 영역과 골격으로 파츠를 나누고, 가려진 곳을 채운 뒤 바로 리깅합니다. 셀 채색 정면 원화에 맞춰져 있어요.</p>
+      <div id="flareSettings" class="hidden">
+        <label class="field-label" for="flareToken">AI Proxy 토큰</label>
+        <input id="flareToken" type="password" autocomplete="off" spellcheck="false" placeholder="토큰 붙여넣기">
+        <label class="switch-row"><span>이 브라우저에 기억</span><input id="flareRemember" type="checkbox"></label>
+        <label class="switch-row"><span>가려진 부분 flare로 그리기</span><input id="flareRedraw" type="checkbox" checked></label>
+        <p class="field-note" id="flareTokenNote"></p>
+        <p class="field-note">토큰은 <a href="https://aiproxy.backoffice.bagelgames.com/" target="_blank" rel="noopener">AI Proxy 콘솔</a>의 My Tokens에서 만들 수 있어요. 기억을 끄면 탭을 닫을 때 지워지고, 저장소·서버에는 보내지 않습니다. 파츠 하나에 flare 1회(약 10초)가 쓰여요.</p>
+      </div>
       <details class="fold">
         <summary>분리 옵션</summary>
         <div class="fold-body">

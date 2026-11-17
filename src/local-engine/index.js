@@ -6,6 +6,7 @@ import { segment } from './segment-core.js';
 import { fitJoints } from './skeleton.js';
 import { assignParts } from './parts.js';
 import { buildLayers } from './layers.js';
+import { applyAiLabels } from './ai-labels.js';
 
 export const LOCAL_ENGINE_ID = 'local-algo';
 export const LOCAL_WORK_SIZE = 1024;
@@ -62,7 +63,7 @@ export function buildReport({ rig, parts, built, width, height, frame }) {
 
   const stages = [
     stage('analyze', analyzeOk ? 'passed' : 'review', `골격 ${rig.method} · 구도 ${frame}${analyzeOk ? '' : ' · 관절 확인 필요'}`),
-    stage('separate', built.layers.length >= 3 ? 'passed' : 'review', `색 영역 ${parts.regionCount}개 → 파츠 ${parts.parts.length}개 → 레이어 ${built.layers.length}개`),
+    stage('separate', built.layers.length >= 3 ? 'passed' : 'review', `${parts.ai ? `flare 부위 지도(덮은 비율 ${Math.round(parts.ai.coverage * 100)}%) + ` : ''}색 영역 ${parts.regionCount}개 → 파츠 ${parts.parts.length}개 → 레이어 ${built.layers.length}개`),
     stage('complete', 'passed', `가려진 곳 ${filled.toLocaleString()}px를 같은 파츠 색으로 보간 (모델 없음, 그림은 확인 필요)`),
     stage('structure', structureOk ? 'passed' : 'review', `재합성 오차 ${(built.recompositeError * 100).toFixed(3)}%`),
     stage('materials', materialsOk ? 'passed' : 'review', materialsOk ? `필수 파츠 ${required.length}개 · 좌우 균형 확인` : '파츠 이름·좌우 확인 필요'),
@@ -77,7 +78,7 @@ export function buildReport({ rig, parts, built, width, height, frame }) {
   }
   return {
     version: 'art-pipeline-1',
-    engine: LOCAL_ENGINE_ID,
+    engine: parts.ai ? 'flare' : LOCAL_ENGINE_ID,
     status: ok ? 'art_passed' : 'needs_review',
     rig_allowed: ok,
     stages,
@@ -104,11 +105,13 @@ function bindingFor(name, rig) {
  */
 export function runLocalEngine(rgba, width, height, params = {}) {
   const t = [performance.now()];
-  const seg = segment(rgba, width, height, params);
+  const seg = segment(rgba, width, height, { ...params, aiLabels: undefined });
   t.push(performance.now());
   const rig = fitJoints(seg.fg, width, height);
   t.push(performance.now());
-  const parts = assignParts(seg, rig);
+  let parts = assignParts(seg, rig);
+  // flare 부위 지도가 있으면 의미는 AI, 경계는 색 영역으로 다시 배정한다.
+  if (params.aiLabels) parts = applyAiLabels(seg, rig, parts, params.aiLabels);
   parts.regionCount = seg.regions.length;
   t.push(performance.now());
   const built = buildLayers(rgba, width, height, seg, rig, parts);
@@ -121,7 +124,7 @@ export function runLocalEngine(rgba, width, height, params = {}) {
     width,
     height,
     frame,
-    layers: built.layers.map((l) => ({ label: l.name, x: l.x, y: l.y, width: l.width, height: l.height, data: l.data, ...bindingFor(l.name, rig) })),
+    layers: built.layers.map((l) => ({ label: l.name, x: l.x, y: l.y, width: l.width, height: l.height, data: l.data, fillMask: l.fillMask, ...bindingFor(l.name, rig) })),
     pipeline,
     timings: { segment: ms(0, 1), skeleton: ms(1, 2), parts: ms(2, 3), layers: ms(3, 4) },
   };

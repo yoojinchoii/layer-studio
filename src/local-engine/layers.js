@@ -437,7 +437,16 @@ export function buildLayers(data, w, h, seg, rig, partsResult) {
     const lh = y1 - y0 + 1;
     const cropped = new Uint8ClampedArray(lw * lh * 4);
     for (let y = 0; y < lh; y++) cropped.set(full.subarray(((y + y0) * w + x0) * 4, ((y + y0) * w + x1 + 1) * 4), y * lw * 4);
-    layers.push({ name, x: x0, y: y0, width: lw, height: lh, data: cropped, filled, visible: count(vis) });
+    // 채운(원래 가려져 있던) 픽셀 표시: flare가 이 자리만 다시 그린다.
+    let fillMask = null;
+    if (filled) {
+      fillMask = new Uint8Array(lw * lh);
+      for (let y = 0; y < lh; y++) for (let x = 0; x < lw; x++) {
+        const i = (y + y0) * w + x + x0;
+        if (full[i * 4 + 3] && !vis[i]) fillMask[y * lw + x] = 1;
+      }
+    }
+    layers.push({ name, x: x0, y: y0, width: lw, height: lh, data: cropped, filled, visible: count(vis), fillMask });
   }
 
   // 4) 재합성 검사

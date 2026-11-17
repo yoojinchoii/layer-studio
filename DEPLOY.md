@@ -25,6 +25,7 @@ gh run watch -R yoojinchoii/layer-studio   # 배포 진행 보기
 ## 지켜야 할 것
 
 - **경로는 상대 경로(`./`)로.** 사이트가 `/layer-studio/` 아래에 있어서 `/app.js`처럼 `/`로 시작하면 깨집니다.
+- **AI Proxy 토큰은 사용자가 사이트에 직접 넣습니다.** 기본은 탭을 닫으면 지워지는 sessionStorage, '기억'을 켜야 localStorage. 저장소·코드에 토큰을 넣지 않습니다. 개발할 때는 localhost에서만 `?flareApi=http://127.0.0.1:포트`로 토큰을 서버 쪽에서 붙이는 중계를 쓸 수 있습니다.
 - **비밀값은 저장소에 넣지 않습니다.** 서버 접속 키는 `../layer-studio-connection.json`(저장소 밖)과 Modal Secret에만 있습니다. 저장소는 공개입니다.
 - **허용 주소.** 사이트 주소가 바뀌면 두 곳을 같이 고칩니다.
   - 서버: `../layer-studio-server/http_api.py`의 `PAGES_ORIGIN` → `../.venv/bin/modal deploy modal_app.py`
@@ -35,6 +36,7 @@ gh run watch -R yoojinchoii/layer-studio   # 배포 진행 보기
 
 | 날짜 | 내용 |
 | --- | --- |
+| 2026-11-17 | flare 엔진 추가(기본값): gpt-image-2.6-flare 부위 지도로 파츠 분리(경계는 색 영역), 가려진 부분 다시 그리기(색이 동떨어지면 버림). 웨이트 기반 메쉬 세분화로 굽힘 찌그러짐 28~47% 감소(`scripts/weight-bench.mjs`) |
 | 2026-11-06 | 그림체 자동 판별(k90) — 페인팅·3D 렌더는 경계 선명도 기준으로 음영 영역 합치기, 얼굴 영역·턱 보정, 긴 치마는 하의 통째 |
 | 2026-11-06 | 가려진 곳 채우기 확장(감싸인 자리 전체), 파츠 안 무늬 조각 정리, 팔짱은 양팔 한 장(`handwear`, 가슴 고정), 턱 관절 피부폭 보정 |
 | 2026-11-06 | GitHub Pages로 이전. 절대 경로 → 상대 경로. 서버·연결 프로그램에 새 주소 허용 추가(옛 주소도 유지) |
