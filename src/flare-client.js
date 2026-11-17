@@ -1,4 +1,4 @@
-// gpt-image-2.6-flare (사내 AI Proxy 경유) 호출: 파츠 분리용 부위 지도, 가려진 부분 다시 그리기.
+// gpt-image-2.6-flare (사내 AI Proxy 경유) 호출: 파츠 분리용 부위 지도, 가려진 부분까지 파츠 완성하기.
 // AI Proxy API(aiproxy-api…)는 브라우저 CORS를 허용하므로 사용자의 AI Proxy 토큰으로 바로 부른다.
 // 토큰은 이 브라우저에만 보관한다(기본: 탭을 닫으면 지워지는 sessionStorage, 선택 시 localStorage).
 
@@ -114,139 +114,282 @@ const PART_TEXT = {
 };
 // 앞에서 가리던 파츠 이름(프롬프트에서 "이건 그리지 말라"고 알려 준다)
 const COVER_TEXT = {
-  front_hair: 'hair', face: 'the face', neck: 'the neck', topwear: 'the shirt', sleeve_r: 'a sleeve', sleeve_l: 'a sleeve', arm_r: 'an arm', arm_l: 'an arm',
+  front_hair: 'the hair', face: 'the face', neck: 'the neck', topwear: 'the shirt', sleeve_r: 'a sleeve', sleeve_l: 'a sleeve', arm_r: 'an arm', arm_l: 'an arm',
   handwear: 'the arms', bottomwear: 'the skirt or shorts', footwear_r: 'a shoe', footwear_l: 'a shoe', legwear_r: 'a leg', legwear_l: 'a leg',
+  eyebrow_r: 'the eyebrows', eyebrow_l: 'the eyebrows', eyelash_r: 'the eyes', eyelash_l: 'the eyes', eyewhite_r: 'the eyes', eyewhite_l: 'the eyes',
+  irides_r: 'the eyes', irides_l: 'the eyes', mouth: 'the mouth', nose: 'the nose',
 };
-// 파츠별 추가 지시: 얼굴·목은 눈·입이 다른 레이어라서 맨살만 그려야 한다.
+// 파츠별 지시: 가려진 쪽으로 어디까지 이어지는지, 무엇을 그리면 안 되는지.
 const PART_HINT = {
-  face: 'The eyes, eyebrows, eyelashes, nose and mouth are separate layers, so paint the masked area as smooth bare skin only: no eyes, no eye whites, no mouth, no hair strands. ',
-  neck: 'Paint only plain neck skin that continues upward behind the chin: never draw a face, eyes, mouth, ears or hair. ',
+  face: 'The eyes, eyebrows, eyelashes, nose and mouth are separate layers: paint their places as smooth bare skin only (no eyes, no eye whites, no mouth, no hair strands). The face skin continues up under the bangs to the hairline. ',
+  neck: 'The neck continues a little upward behind the chin and downward under the collar; draw only plain neck skin, never a face, ears or hair. Most of the masked area is not neck: leave it as background. ',
+  topwear: 'If the garment has sleeves, its body fabric continues outward under each sleeve: draw full rounded shoulders that reach out to the outer edge of the shoulders, and the sides of the garment going down from the armpits, with the same outline. Do not draw the sleeves themselves, arms, hands, hair or skin. ',
+  arm_r: 'The bare arm continues upward under the sleeve to a rounded shoulder; draw that upper arm and shoulder with its outline. ',
+  arm_l: 'The bare arm continues upward under the sleeve to a rounded shoulder; draw that upper arm and shoulder with its outline. ',
+  legwear_r: 'The leg continues a little upward under the skirt or shorts and downward into the shoe; draw it with its outline. Do not draw the other leg. ',
+  legwear_l: 'The leg continues a little upward under the skirt or shorts and downward into the shoe; draw it with its outline. Do not draw the other leg. ',
+  bottomwear: 'The waistband continues upward a little under the shirt; draw the hidden top of the garment with its outline. ',
+  back_hair: 'Draw the hair mass behind the head and neck that the face and front hair were hiding. ',
 };
-// 맨살 파츠: 눈·머리카락 같은 진한 그림이 조금만 섞여도 버린다.
-const SKIN_PARTS = new Set(['face', 'neck']);
 export const MIN_REDRAW_PIXELS = 250;
-export const MAX_FOREIGN_SHARE = 0.3;
-export const MAX_FOREIGN_SHARE_SKIN = 0.06;
+// 덮인 자리 중 파츠에서 이 거리(작업 해상도의 비율) 안만 그리게 한다.
+export const COMPLETE_REACH = 0.12;
+// 덮인 자리를 거의 다 칠했으면(큰 자리일 때) 가리던 파츠를 그대로 다시 그린 것으로 본다.
+export const MAX_FILLED_SHARE = 0.9;
 
-/** 다시 그릴 레이어: 채운 픽셀이 충분하고 의미가 있는 파츠만 (눈동자·흰자 같은 작은 조각 제외) */
-export function redrawTargets(layers) {
-  return layers.filter((l) => l.fillMask && PART_TEXT[l.label] && count(l.fillMask) >= MIN_REDRAW_PIXELS);
-}
 function count(m) { let n = 0; for (let i = 0; i < m.length; i++) n += m[i]; return n; }
 
-/** 이 레이어의 채운 자리를 실제로 덮고 있던 앞쪽 파츠 이름들 (layers는 앞→뒤 순서) */
-export function coveringParts(layers, layer) {
-  const index = layers.indexOf(layer), names = new Set();
-  for (const front of layers.slice(0, Math.max(0, index))) {
-    if (!COVER_TEXT[front.label]) continue;
-    let hits = 0;
-    for (let y = 0; y < layer.height && hits < 20; y++) for (let x = 0; x < layer.width; x++) {
-      if (!layer.fillMask[y * layer.width + x]) continue;
-      const fx = layer.x + x - front.x, fy = layer.y + y - front.y;
-      if (fx >= 0 && fy >= 0 && fx < front.width && fy < front.height && front.data[(fy * front.width + fx) * 4 + 3] > 128 && ++hits >= 20) break;
-    }
-    if (hits >= 20) names.add(COVER_TEXT[front.label]);
-  }
-  return [...names];
+// 맨 앞 파츠(앞머리·소매)는 덮인 자리가 있어도 그 밑을 볼 일이 없어 완성하지 않는다.
+const SKIP_COMPLETE = new Set(['front_hair', 'sleeve_r', 'sleeve_l']);
+/** 완성할 파츠: 이름이 있는 몸·옷 파츠 (눈동자·흰자 같은 작은 조각, 맨 앞 파츠 제외) */
+export function redrawTargets(layers) {
+  return layers.filter((l) => PART_TEXT[l.label] && !SKIP_COMPLETE.has(l.label) && l.data);
 }
 
-export function redrawPrompt(label, covering = []) {
-  const part = PART_TEXT[label] || 'part';
-  const cover = covering.length ? covering.join(' and ') : 'other parts';
-  return `Inpainting task. The image shows ONE isolated layer of a 2D character for Spine skeletal animation: ${part}. `
-    + `The masked area is the part of this ${part} that was covered by ${cover} in the full illustration; the covering parts have been removed and must NOT be drawn. `
-    + `Fill the masked area with the ${part} itself, with the same material and colors as its visible part, continuing its outline, cel shading and any folds or pattern `
-    + `so it looks like one complete, uncovered ${part} in exactly the same art style. Never paint ${cover} or any clothing, hair, face or object that is not part of the ${part}. `
-    + 'Do not draw any outline, seam, hem, cut line or edge line inside the masked area or along its border: it must blend seamlessly into the visible part, and only the side contours of the part itself may continue. '
-    + (PART_HINT[label] || '')
-    + 'Keep the plain white background and keep everything outside the mask unchanged.';
+/** 가까운 거리(체스판 근사) — 1 = 거리 0인 시작 픽셀 */
+function distanceFrom(seed, w, h) {
+  const d = new Float32Array(w * h).fill(1e9), D = Math.SQRT2;
+  for (let i = 0; i < seed.length; i++) if (seed[i]) d[i] = 0;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = y * w + x; let v = d[i];
+    if (x) v = Math.min(v, d[i - 1] + 1);
+    if (y) { v = Math.min(v, d[i - w] + 1); if (x) v = Math.min(v, d[i - w - 1] + D); if (x < w - 1) v = Math.min(v, d[i - w + 1] + D); }
+    d[i] = v;
+  }
+  for (let y = h - 1; y >= 0; y--) for (let x = w - 1; x >= 0; x--) {
+    const i = y * w + x; let v = d[i];
+    if (x < w - 1) v = Math.min(v, d[i + 1] + 1);
+    if (y < h - 1) { v = Math.min(v, d[i + w] + 1); if (x < w - 1) v = Math.min(v, d[i + w + 1] + D); if (x) v = Math.min(v, d[i + w - 1] + D); }
+    d[i] = v;
+  }
+  return d;
 }
 
 /**
- * 한 레이어의 가려진 자리(fillMask)를 flare로 다시 그린다. 알파(모양)는 그대로 두고 그 자리 색만 바꾼다.
- * @param {{label,x,y,width,height,data:Uint8ClampedArray,fillMask:Uint8Array}} layer
- * @param {Array} context 함께 보여 줄 다른 레이어(예: 뒷머리에는 앞머리) — 같은 좌표계
+ * 파츠 완성 계획 (전체 캔버스 좌표). layers는 앞→뒤 순서, 각 {label,x,y,width,height,data,fillMask}.
+ * visible = 원화에 보이는 이 파츠의 픽셀(알고리즘 채움 제외), edit = 앞 파츠가 덮던 자리 중 파츠에서 reach px 안.
+ * flare는 edit 안에서만 그리므로, 평소(조립된) 모습은 원화 그대로다.
  */
-export async function redrawHidden({ token, layer, context = [], covering = [], signal }) {
-  const pad = Math.round(Math.max(layer.width, layer.height) * 0.08) + 4;
-  let x0 = layer.x - pad, y0 = layer.y - pad, x1 = layer.x + layer.width + pad, y1 = layer.y + layer.height + pad;
-  for (const c of context) { x0 = Math.min(x0, c.x); y0 = Math.min(y0, c.y); x1 = Math.max(x1, c.x + c.width); y1 = Math.max(y1, c.y + c.height); }
-  const w = x1 - x0, h = y1 - y0, size = flareSize(w, h), t = fitTransform(w, h, size[0], size[1]);
-  const scene = make(w, h), sctx = scene.getContext('2d');
-  sctx.fillStyle = '#fff'; sctx.fillRect(0, 0, w, h);
-  const own = make(layer.width, layer.height);
-  own.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(layer.data), layer.width, layer.height), 0, 0);
-  sctx.drawImage(own, layer.x - x0, layer.y - y0);
-  for (const c of context) {
-    const cc = make(c.width, c.height);
-    cc.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(c.data), c.width, c.height), 0, 0);
-    sctx.drawImage(cc, c.x - x0, c.y - y0);
-  }
-  // 고칠 자리 = 이 레이어의 채운 픽셀 중 앞에 그린 context에 덮이지 않은 곳(1px 넓혀서 경계까지)
-  const covered = (gx, gy) => context.some((c) => { const cx = gx - c.x, cy = gy - c.y; return cx >= 0 && cy >= 0 && cx < c.width && cy < c.height && c.data[(cy * c.width + cx) * 4 + 3] > 128; });
-  const edit = make(w, h), ectx = edit.getContext('2d'), mask = ectx.createImageData(w, h);
-  for (let i = 0; i < w * h; i++) mask.data[i * 4 + 3] = 255;
-  let editable = 0;
+export function completionPlan(layers, layer, { reach = COMPLETE_REACH, pad = 16 } = {}) {
+  let W = 0, H = 0;
+  for (const l of layers) { W = Math.max(W, l.x + l.width); H = Math.max(H, l.y + l.height); }
+  const index = layers.indexOf(layer), vis = new Uint8Array(W * H), cov = new Uint8Array(W * H), front = new Uint8ClampedArray(W * H * 4);
+  const covers = new Map();
   for (let y = 0; y < layer.height; y++) for (let x = 0; x < layer.width; x++) {
-    if (!layer.fillMask[y * layer.width + x] || covered(layer.x + x, layer.y + y)) continue;
-    editable++;
+    const j = y * layer.width + x;
+    if (layer.data[j * 4 + 3] > 0 && !layer.fillMask?.[j]) vis[(layer.y + y) * W + layer.x + x] = 1;
+  }
+  for (const f of layers.slice(0, Math.max(0, index)).reverse()) for (let y = 0; y < f.height; y++) for (let x = 0; x < f.width; x++) {
+    const j = y * f.width + x;
+    if (f.data[j * 4 + 3] <= 128 || f.fillMask?.[j]) continue;
+    const i = (f.y + y) * W + f.x + x;
+    cov[i] = 1; front.set(f.data.subarray(j * 4, j * 4 + 4), i * 4);
+    if (!covers.has(f.label)) covers.set(f.label, []);
+    covers.get(f.label).push(i);
+  }
+  const dist = distanceFrom(vis, W, H), R = Math.max(W, H) * reach;
+  let x0 = W, y0 = H, x1 = -1, y1 = -1, editable = 0;
+  const editAll = new Uint8Array(W * H);
+  for (let i = 0; i < W * H; i++) {
+    if (cov[i] && !vis[i] && dist[i] <= R) { editAll[i] = 1; editable++; }
+    if (vis[i] || editAll[i]) { const x = i % W, y = (i - x) / W; if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; }
+  }
+  if (x1 < 0) return null;
+  x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(W - 1, x1 + pad); y1 = Math.min(H - 1, y1 + pad);
+  const w = x1 - x0 + 1, h = y1 - y0 + 1;
+  const crop = (src, k = 1) => { const out = new (src.constructor)(w * h * k); for (let y = 0; y < h; y++) out.set(src.subarray(((y0 + y) * W + x0) * k, ((y0 + y) * W + x0 + w) * k), y * w * k); return out; };
+  // 원화에 보이는 이 파츠의 색(반투명 테두리 포함)
+  const color = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < layer.height; y++) for (let x = 0; x < layer.width; x++) {
+    const j = y * layer.width + x, gx = layer.x + x - x0, gy = layer.y + y - y0;
+    if (gx < 0 || gy < 0 || gx >= w || gy >= h || !vis[(layer.y + y) * W + layer.x + x]) continue;
+    color.set(layer.data.subarray(j * 4, j * 4 + 4), (gy * w + gx) * 4);
+  }
+  // 이 파츠의 덮인 자리를 실제로 덮던 앞 파츠(20px 이상)
+  const covering = [];
+  for (const [label, pixels] of covers) {
+    let hits = 0;
+    for (const i of pixels) if (editAll[i] && ++hits >= 20) break;
+    if (hits >= 20 && COVER_TEXT[label] && !covering.includes(COVER_TEXT[label])) covering.push(COVER_TEXT[label]);
+  }
+  return { x0, y0, w, h, visible: crop(vis), edit: crop(editAll), color, front: crop(front, 4), editable, covering };
+}
+
+const WHITE = [255, 255, 255], MAGENTA = [255, 0, 255];
+/** 배경색: 흰색 계열 파츠(흰 옷 등)는 자홍색 배경, 나머지는 흰 배경. */
+export function backgroundFor(plan) {
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < plan.visible.length; i++) if (plan.visible[i] && plan.color[i * 4 + 3] > 200) { r += plan.color[i * 4]; g += plan.color[i * 4 + 1]; b += plan.color[i * 4 + 2]; n++; }
+  if (!n) return { rgb: WHITE, name: 'white' };
+  const light = Math.hypot(255 - r / n, 255 - g / n, 255 - b / n) < 60;
+  return light ? { rgb: MAGENTA, name: 'magenta' } : { rgb: WHITE, name: 'white' };
+}
+
+export function completionPrompt(label, covering = [], bgName = 'white', { plain = false } = {}) {
+  const part = PART_TEXT[label] || 'part';
+  const cover = covering.length ? covering.join(' and ') : 'other parts';
+  // plain: 안전 필터에 걸렸을 때 다시 보내는 순한 문장(맨살 위치 설명을 빼고, 옷을 다 입은 전 연령 캐릭터임을 밝힌다)
+  if (plain) return `Complete one isolated layer of a fully clothed, all-ages 2D cartoon game character. The image shows only the ${part} on a flat ${bgName} background. `
+    + `Inside the masked area, continue the ${part} where it was hidden by ${cover}, keeping its outline, colors and simple cel shading in the same art style. `
+    + `Where the ${part} would not reach, keep the flat ${bgName} background. Never draw ${cover} or any other part. Keep everything outside the mask unchanged.`;
+  return `Complete one isolated layer of a 2D anime character for Spine skeletal animation. The image shows only the ${part} on a flat ${bgName} background. `
+    + `In the full illustration ${cover} lay on top of it inside the masked area; they have been removed. `
+    + `Inside the masked area, draw the portion of the ${part} that was hidden underneath, so that the ${part} looks complete and uncovered: `
+    + 'continue its silhouette, outline, colors, cel shading and folds in exactly the same art style. '
+    + (PART_HINT[label] || '')
+    + `Where the ${part} would not reach, keep the flat ${bgName} background. Never draw ${cover} or any other body part, clothing, hair or object. Keep everything outside the mask unchanged.`;
+}
+
+/**
+ * flare 결과(잘라 낸 영역과 같은 크기의 RGBA)를 파츠에 합친다.
+ * 보이는 픽셀은 원화 그대로, 덮인 자리는 배경색이 아닌 곳만 파츠로(배경과의 거리로 알파, 배경 섞임은 걷어 냄).
+ * 보이는 파츠와 이어진 조각만 남기고, 그 안의 작은 구멍(하이라이트가 배경색과 같아진 곳)은 메운다.
+ * @returns {{x,y,width,height,data,fillMask,drawn}|null}
+ */
+export function mergeCompletion(plan, result, bg = WHITE) {
+  const { w, h, visible, edit, color } = plan, n = w * h;
+  const alpha = new Float32Array(n), rgb = new Float32Array(n * 3);
+  for (let i = 0; i < n; i++) {
+    if (!edit[i]) continue;
+    const r = result[i * 4], g = result[i * 4 + 1], b = result[i * 4 + 2];
+    const a = Math.min(1, Math.max(0, (Math.hypot(r - bg[0], g - bg[1], b - bg[2]) - 12) / 28));
+    if (a <= 0) continue;
+    alpha[i] = a;
+    for (let k = 0; k < 3; k++) rgb[i * 3 + k] = Math.min(255, Math.max(0, (result[i * 4 + k] - bg[k] * (1 - a)) / a));
+  }
+  // 보이는 파츠와 이어진 조각만(8방향)
+  const keep = new Uint8Array(n), queue = [];
+  for (let i = 0; i < n; i++) if (visible[i]) { keep[i] = 1; queue.push(i); }
+  for (let q = 0; q < queue.length; q++) {
+    const i = queue[q], x = i % w, y = (i - x) / w;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-      const mx = layer.x + x - x0 + dx, my = layer.y + y - y0 + dy;
-      if (mx >= 0 && my >= 0 && mx < w && my < h) mask.data[(my * w + mx) * 4 + 3] = 0;
+      const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+      const j = ny * w + nx; if (keep[j] || alpha[j] < 0.3) continue;
+      keep[j] = 1; queue.push(j);
     }
   }
-  if (editable < MIN_REDRAW_PIXELS) return { changed: 0 };
-  ectx.putImageData(mask, 0, 0);
-  const place = (c) => { const o = make(size[0], size[1]), ctx = o.getContext('2d'); ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, size[0], size[1]); ctx.drawImage(c, t.ox, t.oy, w * t.s, h * t.s); return o; };
+  // 구멍: 바깥(테두리·덮이지 않은 빈 곳)에서 닿지 않는 빈 자리
+  const outside = new Uint8Array(n), q2 = [];
+  const solid = (i) => keep[i] && (visible[i] || alpha[i] >= 0.3);
+  for (let i = 0; i < n; i++) { const x = i % w, y = (i - x) / w; if (!solid(i) && (!edit[i] || x === 0 || y === 0 || x === w - 1 || y === h - 1)) { outside[i] = 1; q2.push(i); } }
+  for (let q = 0; q < q2.length; q++) {
+    const i = q2[q], x = i % w, y = (i - x) / w;
+    for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) if (j >= 0 && !outside[j] && !solid(j)) { outside[j] = 1; q2.push(j); }
+  }
+  // 작은 구멍만 메운다(큰 빈 자리는 flare가 일부러 비운 곳일 수 있다).
+  const maxHole = Math.max(60, n * 0.004), seen = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (outside[i] || seen[i] || solid(i) || !edit[i]) continue;
+    const comp = [i]; seen[i] = 1;
+    for (let q = 0; q < comp.length; q++) {
+      const k = comp[q], x = k % w, y = (k - x) / w;
+      for (const j of [x > 0 ? k - 1 : -1, x < w - 1 ? k + 1 : -1, y > 0 ? k - w : -1, y < h - 1 ? k + w : -1]) if (j >= 0 && !seen[j] && !outside[j] && !solid(j)) { seen[j] = 1; comp.push(j); }
+    }
+    if (comp.length > maxHole) for (const k of comp) outside[k] = 1;
+  }
+  let drawn = 0, x0 = w, y0 = h, x1 = -1, y1 = -1;
+  const full = new Uint8ClampedArray(n * 4), fill = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (visible[i]) { full.set(color.subarray(i * 4, i * 4 + 4), i * 4); }
+    else if (edit[i] && (keep[i] && alpha[i] > 0 || !outside[i])) {
+      const a = outside[i] ? alpha[i] : 1, hole = !(keep[i] && alpha[i] > 0);
+      for (let k = 0; k < 3; k++) full[i * 4 + k] = hole ? result[i * 4 + k] : rgb[i * 3 + k];
+      full[i * 4 + 3] = Math.round(255 * a); fill[i] = 1; drawn++;
+    } else continue;
+    const x = i % w, y = (i - x) / w; if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y;
+  }
+  if (x1 < 0) return null;
+  const width = x1 - x0 + 1, height = y1 - y0 + 1, data = new Uint8ClampedArray(width * height * 4), fillMask = new Uint8Array(width * height);
+  for (let y = 0; y < height; y++) {
+    data.set(full.subarray(((y0 + y) * w + x0) * 4, ((y0 + y) * w + x0 + width) * 4), y * width * 4);
+    fillMask.set(fill.subarray((y0 + y) * w + x0, (y0 + y) * w + x0 + width), y * width);
+  }
+  return { x: plan.x0 + x0, y: plan.y0 + y0, width, height, data, fillMask, drawn };
+}
+
+/**
+ * 팔·다리 뿌리 정리: flare가 새로 그린 픽셀 중 뿌리 관절(어깨·엉덩이)보다 몸통 쪽은 지운다(관절에서 3px에 걸쳐 흐리게).
+ * 팔은 상의보다 앞 레이어라, 어깨 둥근 곳까지 그려 두면 팔을 들 때 소매 위로 맨살이 비집고 나온다.
+ * 그 자리는 상의(완성된 어깨)가 보여야 한다. 원화에 보이던 픽셀은 건드리지 않는다.
+ */
+export function trimLimbRoot(layer, root, next, margin = 0) {
+  const len = Math.hypot(next.x - root.x, next.y - root.y);
+  if (!layer?.fillMask || !len) return 0;
+  const dx = (next.x - root.x) / len, dy = (next.y - root.y) / len;
+  let trimmed = 0;
+  for (let y = 0; y < layer.height; y++) for (let x = 0; x < layer.width; x++) {
+    const i = y * layer.width + x;
+    if (!layer.fillMask[i] || !layer.data[i * 4 + 3]) continue;
+    const t = (layer.x + x + 0.5 - root.x) * dx + (layer.y + y + 0.5 - root.y) * dy - margin;
+    if (t >= 3) continue;
+    const k = Math.max(0, t / 3);
+    layer.data[i * 4 + 3] = Math.round(layer.data[i * 4 + 3] * k);
+    if (!layer.data[i * 4 + 3]) { layer.fillMask[i] = 0; trimmed++; }
+  }
+  return trimmed;
+}
+
+/**
+ * 완성된 팔에서 어깨 관절보다 몸통 쪽(+ 위팔 길이의 25%)에 새로 그린 픽셀을 지운다.
+ * joints는 파이프라인 analysis.joints(0–1000 정규화), width·height는 작업 해상도.
+ */
+export function trimArmRoots(layers, joints, width, height, share = 0.25) {
+  const P = (k) => (Array.isArray(joints?.[k]) ? { x: (joints[k][0] * (width - 1)) / 1000, y: (joints[k][1] * (height - 1)) / 1000 } : null);
+  let trimmed = 0;
+  for (const [label, a, b] of [['arm_r', 'shoulder_R', 'elbow_R'], ['arm_l', 'shoulder_L', 'elbow_L']]) {
+    const layer = layers.find((l) => l.label === label), root = P(a), next = P(b);
+    if (layer && root && next) trimmed += trimLimbRoot(layer, root, next, share * Math.hypot(next.x - root.x, next.y - root.y));
+  }
+  return trimmed;
+}
+
+/**
+ * 한 파츠를 flare로 완성한다: 파츠만 단색 배경에 놓고, 앞 파츠가 덮던 자리를 마스크로 열어
+ * 가려졌던 부분(외곽선·음영 포함)을 그리게 한다. 모양도 flare가 정한다.
+ */
+export async function completePart({ token, layers, layer, signal }) {
+  const plan = completionPlan(layers, layer);
+  if (!plan || plan.editable < MIN_REDRAW_PIXELS) return null;
+  const { w, h } = plan, size = flareSize(w, h), t = fitTransform(w, h, size[0], size[1]);
+  const bg = backgroundFor(plan), css = `rgb(${bg.rgb.join(',')})`;
+  const crop = make(w, h);
+  crop.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(plan.color), w, h), 0, 0);
+  const scene = make(size[0], size[1]), sctx = scene.getContext('2d');
+  sctx.fillStyle = css; sctx.fillRect(0, 0, size[0], size[1]);
+  sctx.drawImage(crop, t.ox, t.oy, w * t.s, h * t.s);
+  // 마스크: 투명 = 그릴 자리(덮인 자리를 1px 넓혀 경계까지). 바깥 여백은 불투명(그대로).
+  const hole = make(w, h), hctx = hole.getContext('2d'), hd = hctx.createImageData(w, h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let open = plan.edit[y * w + x];
+    for (let dy = -1; dy <= 1 && !open; dy++) for (let dx = -1; dx <= 1 && !open; dx++) { const nx = x + dx, ny = y + dy; if (nx >= 0 && ny >= 0 && nx < w && ny < h && plan.edit[ny * w + nx]) open = 1; }
+    if (open) hd.data[(y * w + x) * 4 + 3] = 255;
+  }
+  hctx.putImageData(hd, 0, 0);
   const maskCanvas = make(size[0], size[1]), mctx = maskCanvas.getContext('2d');
   mctx.fillStyle = '#000'; mctx.fillRect(0, 0, size[0], size[1]);
   mctx.globalCompositeOperation = 'destination-out';
-  // 마스크: 투명 = 고칠 자리. 바깥 여백은 불투명(그대로).
-  const hole = make(w, h), hctx = hole.getContext('2d'), holeData = hctx.createImageData(w, h);
-  for (let i = 0; i < w * h; i++) if (!mask.data[i * 4 + 3]) holeData.data[i * 4 + 3] = 255;
-  hctx.putImageData(holeData, 0, 0);
   mctx.drawImage(hole, t.ox, t.oy, w * t.s, h * t.s);
-  const { canvas: out } = await callFlare({ token, image: await toBlob(place(scene)), mask: await toBlob(maskCanvas), prompt: redrawPrompt(layer.label, covering), size, signal });
-  // 결과를 레이어 좌표로 되돌려 채운 픽셀의 색만 바꾼다(알파는 원래 모양).
-  const back = make(layer.width, layer.height), bctx = back.getContext('2d', { willReadFrequently: true });
-  const sx = out.width / size[0], sy = out.height / size[1];
-  bctx.drawImage(out, (t.ox + (layer.x - x0) * t.s) * sx, (t.oy + (layer.y - y0) * t.s) * sy, layer.width * t.s * sx, layer.height * t.s * sy, 0, 0, layer.width, layer.height);
-  const px = bctx.getImageData(0, 0, layer.width, layer.height).data;
-  const data = new Uint8ClampedArray(layer.data);
-  // 흰 옷처럼 원래 흰색이 많은 파츠가 아니면, flare가 흰 배경으로 남긴 자리는 "여기는 그리지 않음"으로 보고 기존 채움을 둔다
-  // (모양을 깎아 내면 팔을 들 때 어깨에 구멍이 난다).
-  let white = 0, seen = 0;
-  for (let i = 0; i < layer.fillMask.length; i++) if (!layer.fillMask[i] && data[i * 4 + 3] > 200) { seen++; if (Math.min(data[i * 4], data[i * 4 + 1], data[i * 4 + 2]) >= 236) white++; }
-  const whitePart = seen && white / seen > 0.15;
-  let changed = 0, far = 0, total = 0;
-  const farDist = SKIN_PARTS.has(layer.label) ? 60 : 110;
-  for (let i = 0; i < layer.fillMask.length; i++) {
-    if (!layer.fillMask[i] || !data[i * 4 + 3]) continue;
-    const x = i % layer.width, y = (i - x) / layer.width;
-    if (covered(layer.x + x, layer.y + y)) continue;
-    // 반투명·투명으로 돌아온 자리는 기존 채움색과 섞는다(투명 = 그리지 않음).
-    const a = px[i * 4 + 3] / 255;
-    if (a < 0.05) continue;
-    if (!whitePart && Math.min(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]) >= 246) continue;
-    const rgb = [0, 1, 2].map((k) => px[i * 4 + k] * a + data[i * 4 + k] * (1 - a));
-    total++;
-    // 보간 색과 동떨어진 픽셀(흰 반짝임·박음질 점·가리던 옷 색)은 하나씩 버리고 보간 색을 둔다
-    const dist = Math.hypot(rgb[0] - data[i * 4], rgb[1] - data[i * 4 + 1], rgb[2] - data[i * 4 + 2]);
-    if (dist > 110) far++; // 전체를 버릴지 판단(가리던 옷·눈을 그린 경우)
-    if (dist > farDist) continue;
-    data[i * 4] = rgb[0]; data[i * 4 + 1] = rgb[1]; data[i * 4 + 2] = rgb[2];
-    changed++;
+  const image = await toBlob(scene), mask = await toBlob(maskCanvas);
+  let out;
+  try {
+    ({ canvas: out } = await callFlare({ token, image, mask, prompt: completionPrompt(layer.label, plan.covering, bg.name), size, signal }));
+  } catch (e) {
+    // 다리·목처럼 맨살 파츠는 안전 필터에 가끔 걸린다: 순한 문장으로 한 번 더.
+    if (!/safety|moderation|rejected/i.test(e.message)) throw e;
+    ({ canvas: out } = await callFlare({ token, image, mask, prompt: completionPrompt(layer.label, plan.covering, bg.name, { plain: true }), size, signal }));
   }
-  // 안전장치: 다시 그린 자리의 상당 부분이 원래 파츠 색(보간 채움)과 동떨어지면 가리던 옷 등을 그린 것으로 보고 버린다.
-  const limit = SKIN_PARTS.has(layer.label) ? MAX_FOREIGN_SHARE_SKIN : MAX_FOREIGN_SHARE;
-  if (total && far / total > limit) throw Error(`다시 그린 색이 원래 파츠와 너무 달라 버렸어요 (${Math.round((100 * far) / total)}%)`);
-  return { changed, data };
+  const back = make(w, h), bctx = back.getContext('2d', { willReadFrequently: true });
+  const sx = out.width / size[0], sy = out.height / size[1];
+  bctx.drawImage(out, t.ox * sx, t.oy * sy, w * t.s * sx, h * t.s * sy, 0, 0, w, h);
+  const merged = mergeCompletion(plan, bctx.getImageData(0, 0, w, h).data, bg.rgb);
+  if (!merged) throw Error('flare 결과에서 파츠를 찾지 못했어요');
+  if (plan.editable > 4000 && merged.drawn / plan.editable > MAX_FILLED_SHARE) throw Error(`가리던 파츠까지 그린 것 같아 버렸어요 (${Math.round((100 * merged.drawn) / plan.editable)}%)`);
+  return merged;
 }
 
-/** 여러 레이어를 동시에 최대 limit개씩 다시 그린다. 하나가 실패해도 나머지는 계속한다. */
+/** 여러 파츠를 동시에 최대 limit개씩 완성한다. 하나가 실패해도 나머지는 계속한다(실패한 파츠는 알고리즘 채움 유지). */
 export async function redrawAll({ token, layers, signal, limit = 3, onProgress = () => {} }) {
   const targets = redrawTargets(layers);
-  const byLabel = new Map(layers.map((l) => [l.label, l]));
   const results = new Map();
   const errors = [];
   let next = 0, done = 0;
@@ -255,14 +398,13 @@ export async function redrawAll({ token, layers, signal, limit = 3, onProgress =
     while (next < targets.length) {
       const layer = targets[next++];
       if (signal?.aborted) return;
-      const context = layer.label === 'back_hair' && byLabel.get('front_hair') ? [byLabel.get('front_hair')] : [];
       try {
-        const r = await redrawHidden({ token, layer, context, covering: coveringParts(layers, layer), signal });
-        if (r.changed) results.set(layer.label, r);
+        const r = await completePart({ token, layers, layer, signal });
+        if (r?.drawn) results.set(layer.label, r);
       } catch (e) {
         if (e.name === 'AbortError') throw e;
         errors.push(`${layer.label}: ${e.message}`);
-        // 토큰·예산 문제는 다른 레이어도 똑같이 실패하므로 멈춘다.
+        // 토큰·예산 문제는 다른 파츠도 똑같이 실패하므로 멈춘다.
         if (/토큰|예산/.test(e.message)) { next = targets.length; }
       }
       onProgress(++done, targets.length);

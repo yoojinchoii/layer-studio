@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { weightDistance, refinementPoints } from './weight-refine.js';
 import { normalizeBound } from './rig-core.js';
 import { AI_CLASSES, classifyMap, segmentationPrompt, applyAiLabels } from './local-engine/ai-labels.js';
-import { flareSize, fitTransform, validToken, redrawTargets, MIN_REDRAW_PIXELS } from './flare-client.js';
+import { flareSize, fitTransform, validToken, redrawTargets, completionPlan, mergeCompletion, completionPrompt, backgroundFor, trimLimbRoot } from './flare-client.js';
 
 test('weight distance is 0 for equal weights and 1 for disjoint bones', () => {
   assert.equal(weightDistance(new Map([['a', 1]]), new Map([['a', 1]])), 0);
@@ -66,18 +66,62 @@ test('flare sizes follow the aspect ratio and the fit keeps the whole image insi
   assert.ok(t.ox >= 0 && t.oy >= 0 && 500 * t.s <= 1024 + 1e-9 && 1000 * t.s <= 1536 + 1e-9);
 });
 
-test('tokens are validated and only meaningful hidden areas are redrawn', () => {
+test('tokens are validated and only named body parts are completed', () => {
   assert.equal(validToken('short'), false);
   assert.equal(validToken('abc def ghi jkl mno pqr'), false);
   assert.equal(validToken('A'.repeat(40)), true);
-  const mask = (k) => { const m = new Uint8Array(1000); m.fill(1, 0, k); return m; };
-  const layers = [
-    { label: 'topwear', fillMask: mask(MIN_REDRAW_PIXELS) },
-    { label: 'arm_r', fillMask: mask(MIN_REDRAW_PIXELS - 1) },
-    { label: 'eyewhite_r', fillMask: mask(900) },
-    { label: 'legwear_l', fillMask: null },
-  ];
-  assert.deepEqual(redrawTargets(layers).map((l) => l.label), ['topwear']);
+  const d = new Uint8ClampedArray(4);
+  const layers = [{ label: 'topwear', data: d }, { label: 'arm_r', data: d }, { label: 'eyewhite_r', data: d }, { label: 'legwear_l', data: null }];
+  assert.deepEqual(redrawTargets(layers).map((l) => l.label), ['topwear', 'arm_r']);
+});
+
+// 20x10 캔버스: 앞 파츠(소매, x 10..19)가 뒤 파츠(팔, x 0..9 보임)를 덮는다.
+const rect = (label, x, y, w, h, rgb, fill = null) => { const data = new Uint8ClampedArray(w * h * 4); for (let i = 0; i < w * h; i++) data.set([...rgb, 255], i * 4); return { label, x, y, width: w, height: h, data, fillMask: fill }; };
+test('completion plan opens only the covered pixels near the visible part', () => {
+  const sleeve = rect('sleeve_r', 10, 0, 10, 10, [0, 128, 128]);
+  // 팔 레이어는 알고리즘 채움(x 10..11)을 갖고 있지만, 계획은 원화에 보이는 픽셀만 본다.
+  const fill = new Uint8Array(12 * 10); for (let y = 0; y < 10; y++) fill[y * 12 + 10] = fill[y * 12 + 11] = 1;
+  const arm = rect('arm_r', 0, 0, 12, 10, [250, 210, 190], fill);
+  const plan = completionPlan([sleeve, arm], arm, { reach: 0.3, pad: 0 });
+  assert.equal(plan.w, 16); // 보이는 0..9 + 덮인 자리 6px(=20*0.3)
+  assert.equal(plan.edit[0 * plan.w + 9], 0); assert.equal(plan.edit[0 * plan.w + 10], 1); assert.equal(plan.edit[0 * plan.w + 15], 1);
+  assert.equal(plan.visible[0 * plan.w + 10], 0);
+  assert.deepEqual(plan.covering, ['a sleeve']);
+  assert.match(completionPrompt('arm_r', plan.covering), /hidden underneath/);
+  assert.deepEqual(backgroundFor(plan).name, 'white');
+});
+
+test('merged completion keeps visible pixels, takes drawn ones, drops the background and loose islands', () => {
+  const sleeve = rect('sleeve_r', 10, 0, 10, 10, [0, 128, 128]);
+  const arm = rect('arm_r', 0, 0, 10, 10, [250, 210, 190]);
+  const plan = completionPlan([sleeve, arm], arm, { reach: 0.5, pad: 0 });
+  const out = new Uint8ClampedArray(plan.w * plan.h * 4).fill(255);
+  for (let y = 0; y < plan.h; y++) for (let x = 0; x < plan.w; x++) {
+    const i = (y * plan.w + x) * 4;
+    if (x < 14) out.set([240, 200, 180, 255], i); // 팔이 4px 이어짐
+    if (x === 18 && y === 5) out.set([10, 10, 10, 255], i); // 떨어진 점은 버림
+  }
+  const m = mergeCompletion(plan, out, [255, 255, 255]);
+  assert.equal(m.x, 0); assert.equal(m.width, 14);
+  assert.deepEqual([...m.data.subarray(0, 4)], [250, 210, 190, 255]);
+  assert.deepEqual([...m.data.subarray(12 * 4, 12 * 4 + 4)], [240, 200, 180, 255]);
+  assert.equal(m.fillMask[12], 1); assert.equal(m.fillMask[0], 0);
+  assert.equal(m.drawn, 40);
+});
+
+test('drawn arm pixels on the torso side of the shoulder are removed, visible ones stay', () => {
+  // 세로 팔(10x20): 위 10줄은 flare가 그린 자리, 어깨 관절 (5,5) → 팔꿈치 (5,15)
+  const fill = new Uint8Array(200); fill.fill(1, 0, 100);
+  const arm = rect('arm_r', 0, 0, 10, 20, [250, 210, 190], fill);
+  fill[0] = 0; // 원화에 보이던 픽셀은 남는다
+  const n = trimLimbRoot(arm, { x: 5, y: 5 }, { x: 5, y: 15 }, 2);
+  assert.ok(n >= 60);
+  assert.equal(arm.data[3], 255);
+  assert.equal(arm.data[(3 * 10 + 4) * 4 + 3], 0);
+  assert.ok(arm.data[(9 * 10 + 4) * 4 + 3] > 150); // 관절 + 여유 뒤 3px은 흐리게
+  assert.equal(arm.data[(12 * 10 + 4) * 4 + 3], 255);
+  assert.match(completionPrompt('legwear_l', ['the shorts'], 'white', { plain: true }), /all-ages/);
+  assert.deepEqual(redrawTargets([{ label: 'sleeve_r', data: new Uint8ClampedArray(4) }, { label: 'neck', data: new Uint8ClampedArray(4) }]).map((l) => l.label), ['neck']);
 });
 
 test('vertex weights always sum to exactly 1 after dropping tiny values', () => {
