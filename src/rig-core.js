@@ -466,8 +466,9 @@ function templateAnimations(rig,ikNames,amplitude){
   };
   // o = +1 rotates the screen-right limb outward/up (counter-clockwise); the screen-left limb mirrors it.
   const each=(fn)=>Object.assign({},...[['left',-1],['right',1]].map(([side,o])=>fn(side,o)));
-  out.idle=make(4,{chest:{rotate:p=>sin(p)*.3*A,scale:p=>[1,1+(1-Math.cos(p*2*Math.PI))*.006*A]},head:{rotate:p=>-sin(p,1,-.08)*.65*A},hair:{rotate:p=>sin(p,1,-.15)*A},
-    ...each((side,o)=>({[`arm_${side}`]:{rotate:p=>-o*sin(p)*.75*A},[`elbow_${side}`]:{rotate:p=>-o*sin(p,1,-.1)*1.2*A}}))});
+  const idleSpec={chest:{rotate:p=>sin(p)*.3*A,scale:p=>[1,1+(1-Math.cos(p*2*Math.PI))*.006*A]},head:{rotate:p=>-sin(p,1,-.08)*.65*A},hair:{rotate:p=>sin(p,1,-.15)*A},
+    ...each((side,o)=>({[`arm_${side}`]:{rotate:p=>-o*sin(p)*.75*A},[`elbow_${side}`]:{rotate:p=>-o*sin(p,1,-.1)*1.2*A}}))};
+  out.idle=make(4,idleSpec);
   // Template motions stay small: a starting point the animator exaggerates, not a finished take.
   out.wave=make(1.6,{chest:{rotate:p=>sin(p)*.8},head:{rotate:p=>sin(p,1,.25)*1.5},hair:{rotate:p=>-sin(p,1,.1)*1.2},
     arm_right:{rotate:p=>40+sin(p)*3},elbow_right:{rotate:p=>25+sin(p,2)*12},wrist_right:{rotate:p=>sin(p,2,-.12)*6},arm_left:{rotate:p=>sin(p)*1}});
@@ -480,7 +481,7 @@ function templateAnimations(rig,ikNames,amplitude){
   out.hop=make(1,{body:{translate:p=>[0,-legLength*(1-Math.cos(theta*crouch(p)*D2R))+air(p)*16*s]},head:{rotate:p=>-crouch(p)*1.5},hair:{rotate:p=>air(p)*3-crouch(p)*1.5},
     ...each((side,o)=>({[`hip_${side}`]:{rotate:p=>o*theta*crouch(p)},[`knee_${side}`]:{rotate:p=>-o*2*theta*crouch(p)},[`ankle_${side}`]:{rotate:p=>o*theta*crouch(p)},
       [`arm_${side}`]:{rotate:p=>o*(14*air(p)-4*crouch(p))},[`elbow_${side}`]:{rotate:p=>o*6*air(p)}}))});
-  for(const [key,{duration,spec}]of Object.entries(demoMotionSpecs(rig,setupPose(rig).world,A)))out[key]=make(duration,spec);
+  for(const [key,{duration,spec}]of Object.entries(demoMotionSpecs(rig,setupPose(rig).world,A))){if(key==='idle_face'){out.idle=make(4,{...idleSpec,...spec});continue;}out[key]=make(duration,spec);}
   return Object.fromEntries(availableAnimations(rig).map(key=>[key,out[key]]));
 }
 export function makeSkeleton(parts,rig,amplitude=1){

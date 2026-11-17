@@ -157,6 +157,7 @@ export function redrawPrompt(label, covering = []) {
     + `The masked area is the part of this ${part} that was covered by ${cover} in the full illustration; the covering parts have been removed and must NOT be drawn. `
     + `Fill the masked area with the ${part} itself, with the same material and colors as its visible part, continuing its outline, cel shading and any folds or pattern `
     + `so it looks like one complete, uncovered ${part} in exactly the same art style. Never paint ${cover} or any clothing, hair, face or object that is not part of the ${part}. `
+    + 'Do not draw any outline, seam, hem, cut line or edge line inside the masked area or along its border: it must blend seamlessly into the visible part, and only the side contours of the part itself may continue. '
     + (PART_HINT[label] || '')
     + 'Keep the plain white background and keep everything outside the mask unchanged.';
 }
@@ -218,6 +219,7 @@ export async function redrawHidden({ token, layer, context = [], covering = [], 
   for (let i = 0; i < layer.fillMask.length; i++) if (!layer.fillMask[i] && data[i * 4 + 3] > 200) { seen++; if (Math.min(data[i * 4], data[i * 4 + 1], data[i * 4 + 2]) >= 236) white++; }
   const whitePart = seen && white / seen > 0.15;
   let changed = 0, far = 0, total = 0;
+  const farDist = SKIN_PARTS.has(layer.label) ? 60 : 110;
   for (let i = 0; i < layer.fillMask.length; i++) {
     if (!layer.fillMask[i] || !data[i * 4 + 3]) continue;
     const x = i % layer.width, y = (i - x) / layer.width;
@@ -228,7 +230,10 @@ export async function redrawHidden({ token, layer, context = [], covering = [], 
     if (!whitePart && Math.min(px[i * 4], px[i * 4 + 1], px[i * 4 + 2]) >= 246) continue;
     const rgb = [0, 1, 2].map((k) => px[i * 4 + k] * a + data[i * 4 + k] * (1 - a));
     total++;
-    if (Math.hypot(rgb[0] - data[i * 4], rgb[1] - data[i * 4 + 1], rgb[2] - data[i * 4 + 2]) > 110) far++;
+    // 보간 색과 동떨어진 픽셀(흰 반짝임·박음질 점·가리던 옷 색)은 하나씩 버리고 보간 색을 둔다
+    const dist = Math.hypot(rgb[0] - data[i * 4], rgb[1] - data[i * 4 + 1], rgb[2] - data[i * 4 + 2]);
+    if (dist > 110) far++; // 전체를 버릴지 판단(가리던 옷·눈을 그린 경우)
+    if (dist > farDist) continue;
     data[i * 4] = rgb[0]; data[i * 4 + 1] = rgb[1]; data[i * 4 + 2] = rgb[2];
     changed++;
   }

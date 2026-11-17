@@ -115,8 +115,8 @@ function rawFaceWeights(layer,rig,bone,x,y){
   if(/^face_(eye|lid_)/.test(bone)){
     const which=bone.endsWith('left')?'left':'right',eye=`face_eye_${which}`,b=rig.faceGeometry?.eyes?.[which]||{x:layer.x,y:layer.y,width:layer.width,height:layer.height};
     const center=1-smooth(Math.abs(x-(b.x+b.width/2))/(b.width*.5));
-    if(bone.startsWith('face_lid_')){const w=.9*center;return [[eye,1-w],[bone,w]].filter(([id,v])=>ids.includes(id)&&v>0).map((v,i,a)=>[v[0],v[1]/a.reduce((n,q)=>n+q[1],0)]);}
-    const upper=`face_lid_upper_${which}`,lower=`face_lid_lower_${which}`,id=y<P[eye].y?upper:lower,w=ids.includes(id)?.25*center:0;return [[eye,1-w],[id,w]].filter(([id,v])=>ids.includes(id)&&v>0);
+    if(bone.startsWith('face_lid_')){const w=bone.startsWith('face_lid_upper_')?1:.9*center;return [[eye,1-w],[bone,w]].filter(([id,v])=>ids.includes(id)&&v>0).map((v,i,a)=>[v[0],v[1]/a.reduce((n,q)=>n+q[1],0)]);}
+    const upper=`face_lid_upper_${which}`,lower=`face_lid_lower_${which}`,id=y<P[eye].y?upper:lower,w=0;return [[eye,1-w],[id,w]].filter(([id,v])=>ids.includes(id)&&v>0);
   }
   if(bone!=='face_root'){const total=ids.length;return ids.map(id=>[id,1/total]);}
   // Compact supports, with an anchored base. Distant points never pull the entire face.
