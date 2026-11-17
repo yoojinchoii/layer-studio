@@ -417,6 +417,11 @@ function meshAxis(size,offset,joints,key){
   return sorted.length<=40?sorted:Array.from({length:40},(_,i)=>sorted[Math.round(i*(sorted.length-1)/39)]);
 }
 export const WEIGHT_REFINE_ROUNDS=2;
+// 정점 웨이트를 뼈별로 합치고, 아주 작은 값(0.5% 미만)은 버린 뒤 합이 정확히 1이 되게 맞춘다.
+// (소매 경계처럼 한쪽 값만 걸러지면 합이 0.997 같은 값이 되어 Spine에서 정점이 끌려간다)
+export function normalizeBound(pairs,fallback){const bound=new Map();for(const [b,w]of pairs)if(Number.isFinite(w)&&w>0)bound.set(b,(bound.get(b)||0)+w);
+  for(const [b,w]of bound)if(w<.005&&bound.size>1)bound.delete(b);let sum=0;for(const w of bound.values())sum+=w;
+  if(!(sum>0))return new Map([[fallback,1]]);for(const [b,w]of bound)bound.set(b,w/sum);return bound;}
 export function buildMesh(layer,rig,mode,bone,setup){
   const guide=weightGuide(layer,rig,mode,bone,layer.x+layer.width/2,layer.y+layer.height/2);
   if(mode==='torso')for(const side of ['left','right']){if(layer.detachedSleeves?.includes(side))continue;const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`];const d=A&&E&&unit(E.x-A.x,E.y-A.y);if(d)guide.joints=[...guide.joints,{id:`arm_${side}`,p:A,dir:d,band:Math.hypot(E.x-A.x,E.y-A.y)*.2}];}
@@ -425,7 +430,7 @@ export function buildMesh(layer,rig,mode,bone,setup){
   // 정점 하나의 웨이트(뼈→값). 관절 띠·옷 규칙은 weightGuide/guideWeights가, 세분화는 weight-refine.js가 맡는다.
   const weightAt=(lx0,ly0)=>{const x=layer.x+lx0,y=layer.y+ly0;
     const g=mode==='bottoms'||mode==='legs'||mode==='feet'?weightGuide(layer,rig,mode,bone,x,y):guide;
-    const weights=mode==='face'?faceWeights(layer,rig,bone,x,y):mode==='bottoms'?crotchWeights(rig,g,guideWeights(g,x,y),x):mode==='torso'?shirtWeights(g,guideWeights({...g,joints:g.joints.filter(j=>!/^arm_/.test(j.id))},x,y),x,y,rig,layer.detachedSleeves):guideWeights(g,x,y);const bound=new Map();for(const [id,w]of weights){const b=activeBone(rig,id);bound.set(b,(bound.get(b)||0)+w);}return bound;};
+    const weights=mode==='face'?faceWeights(layer,rig,bone,x,y):mode==='bottoms'?crotchWeights(rig,g,guideWeights(g,x,y),x):mode==='torso'?shirtWeights(g,guideWeights({...g,joints:g.joints.filter(j=>!/^arm_/.test(j.id))},x,y),x,y,rig,layer.detachedSleeves):guideWeights(g,x,y);return normalizeBound(weights.map(([id,w])=>[activeBone(rig,id),w]),activeBone(rig,bone));};
   let topology=silhouetteTopology(layer,guide.joints,rig.meshDensity,extra);
   // 웨이트가 크게 바뀌는 긴 변에 정점을 더 넣어 관절을 가로지르는 큰 삼각형을 없앤다(얼굴·단단한 파츠 제외).
   const rounds=rig.weightRefine??WEIGHT_REFINE_ROUNDS;

@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { weightDistance, refinementPoints } from './weight-refine.js';
+import { normalizeBound } from './rig-core.js';
 import { AI_CLASSES, classifyMap, segmentationPrompt, applyAiLabels } from './local-engine/ai-labels.js';
 import { flareSize, fitTransform, validToken, redrawTargets, MIN_REDRAW_PIXELS } from './flare-client.js';
 
@@ -77,4 +78,14 @@ test('tokens are validated and only meaningful hidden areas are redrawn', () => 
     { label: 'legwear_l', fillMask: null },
   ];
   assert.deepEqual(redrawTargets(layers).map((l) => l.label), ['topwear']);
+});
+
+test('vertex weights always sum to exactly 1 after dropping tiny values', () => {
+  const sum = (m) => [...m.values()].reduce((a, b) => a + b, 0);
+  // 소매 경계: 팔 0.997, 몸통 0.003 → 몸통을 버리면 팔이 1이 되어야 한다
+  const a = normalizeBound([['upper_arm_R', 0.997], ['torso', 0.003]], 'torso');
+  assert.deepEqual([...a.keys()], ['upper_arm_R']); assert.equal(sum(a), 1);
+  const b = normalizeBound([['torso', 0.4], ['torso', 0.2], ['neck', 0.2]], 'torso');
+  assert.ok(Math.abs(sum(b) - 1) < 1e-12); assert.ok(Math.abs(b.get('torso') - 0.75) < 1e-12);
+  assert.deepEqual([...normalizeBound([['x', NaN]], 'torso')], [['torso', 1]]);
 });
