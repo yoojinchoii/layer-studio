@@ -50,6 +50,11 @@ test('AI labels relabel parts per color region, keep sides by joints and protect
   // 팔짱(handwear)으로 본 픽셀은 AI가 팔이라고 해도 그대로 둔다
   const crossed = applyAiLabels(seg, rig, { partLabels: new Int32Array(n).fill(1), parts: [{ id: 1, name: 'handwear' }] }, new Uint8Array(n).fill(AI_CLASSES.find((c) => c.key === 'arm').id));
   assert.deepEqual(crossed.parts.map((p) => p.name), ['handwear']);
+  // 턱 위 얼굴(눈 등)은 AI가 목이라고 해도 얼굴로 남고, 턱 아래는 목으로 바뀐다
+  const neck = AI_CLASSES.find((c) => c.key === 'neck').id;
+  const face = applyAiLabels(seg, { ...rig, points: { ...rig.points, head: { x: 2, y: 1 } } }, { partLabels: new Int32Array(n).fill(1), parts: [{ id: 1, name: 'face' }] }, new Uint8Array(n).fill(neck));
+  const faceName = (i) => face.parts.find((p) => p.id === face.partLabels[i]).name;
+  assert.equal(faceName(0), 'face'); assert.equal(faceName(4), 'neck');
 });
 
 test('flare sizes follow the aspect ratio and the fit keeps the whole image inside', () => {

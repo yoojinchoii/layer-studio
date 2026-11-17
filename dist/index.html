@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="./style.css?v=art-quality-17">
+<link rel="stylesheet" href="./style.css?v=flare-18">
 </head>
 <body>
 <header class="topbar">
@@ -17,7 +17,6 @@
     <span class="chip" id="fileTag">준비</span>
   </div>
   <div class="header-actions">
-    <span class="chip" id="appVersion">파츠 편집·모션 검수 17</span>
     <button class="button ghost" id="helpBtn"><i data-lucide="circle-help"></i><span>사용 가이드</span></button>
     <button class="button ghost connection-btn" id="connectionBtn"><i data-lucide="plug-zap"></i><span>서버 연결</span></button>
   </div>
@@ -36,8 +35,6 @@
       </label>
       <div class="link-row">
         <button class="text-btn" id="sampleBtn"><i data-lucide="sparkles"></i>테스트 이미지 선택</button>
-        <button class="text-btn" id="rigDemo">분리된 샘플로 관절 편집</button>
-        <button class="text-btn" id="redrawDemo">수정 예제 17 열기 · AI 사용 없음</button>
       </div>
       <label class="field-label" for="frameHint">리깅 구도</label>
       <select id="frameHint"><option value="auto">자동 · 파츠에서 판단</option><option value="full">전신</option><option value="half">상반신</option><option value="bust">흉상 · 얼굴 전용</option></select>
@@ -83,7 +80,6 @@
         <ul id="artIssues"></ul>
         <p id="artRawHint" class="field-note"></p>
         <button id="artRetry" class="button secondary">저장된 파츠로 분석·복원 재검사</button>
-        <p class="field-note">See-through 분리는 반복하지 않습니다. 구조 분석·복원 GPU 사용량은 발생합니다.</p>
         <button id="artCandidateSave" class="button secondary" hidden>검토용 복원 후보 PSD</button>
         <details id="manualArtReview" class="fold" hidden><summary>직접 수정한 파츠로 리깅 이어가기</summary><div class="fold-body">
           <p class="field-note">AI 재실행 없이 진행합니다. 자동 검사 실패 기록은 유지되며, 아래 확인은 사용자의 그림 검수로 기록됩니다.</p>
@@ -103,6 +99,8 @@
         <button id="exportPsd" class="button outlined" disabled><i data-lucide="download"></i> PSD 저장</button>
         <button id="exportZip" class="button outlined" disabled>PNG 묶음 <span class="tag">ZIP</span></button>
       </div>
+      <button id="exportSheet" class="button outlined full" style="margin-top:8px" disabled><i data-lucide="layout-grid"></i> 파츠 펼친 PSD · 한 장으로 보기</button>
+      <p class="field-note">PSD 저장은 원래 위치로 조립된 Spine용, 펼친 PSD는 파츠마다 가려졌던 부분까지 따로 보이게 한 장에 늘어놓습니다.</p>
     </section>
 
     <section class="step step-last">
@@ -120,7 +118,7 @@
           <small>같은 브라우저에서만 복원할 수 있어요. PSD·편집 프로젝트도 함께 저장해 두세요.</small>
         </div>
       </details>
-      <p class="privacy-note"><i data-lucide="shield-check"></i>파일은 브라우저에서 처리하고, AI 실행 때만 연결한 서버로 보냅니다.</p>
+      <p class="privacy-note"><i data-lucide="shield-check"></i>파일은 브라우저에서 처리하고, AI 분리를 실행할 때만 원화를 AI Proxy(또는 연결한 서버)로 보냅니다.</p>
     </section>
   </aside>
 
@@ -222,7 +220,7 @@
       <strong>흉상</strong><span>얼굴·목·어깨</span><small>흉상 템플릿 · 목·어깨 회전</small>
     </button>
   </div>
-  <p class="sample-note">세 이미지는 아직 분리되지 않은 원본입니다. 불러온 뒤 AI 레이어 분리를 누르면 서버 사용량이 발생해요. 분리 없이 리깅을 체험하려면 기존 ‘분리된 샘플로 관절 편집’을 이용하세요.</p>
+  <p class="sample-note">세 이미지는 아직 분리되지 않은 원본입니다. 불러온 뒤 분리를 누르면 flare 사용량이 발생해요.</p>
 </dialog>
 
 <dialog id="connectionDialog">
@@ -575,6 +573,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="./app.js?v=art-quality-17"></script>
+<script type="module" src="./app.js?v=flare-18"></script>
 </body>
 </html>

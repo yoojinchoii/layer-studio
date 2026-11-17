@@ -10,7 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DIST = ROOT / "dist"
 BRIDGE = ROOT.parent / "spine-bridge"
-FILES = ["index.html", "app.js", "local-engine-worker.js", "style.css", "rig-demo.json", "redraw-demo-17.json",
+FILES = ["index.html", "app.js", "local-engine-worker.js", "style.css",
          "sample-character.png", "sample-half-body.png", "sample-bust.png"]
 FOLDER = "Layer Studio Spine 연결"
 

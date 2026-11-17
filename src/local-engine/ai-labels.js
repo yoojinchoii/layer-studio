@@ -86,6 +86,9 @@ export function applyAiLabels(seg, rig, partsResult, ai, { regionShare = 0.88 } 
   }
 
   const oldNames = new Map(partsResult.parts.map((p) => [p.id, p.name]));
+  // 턱(head 관절) 위의 얼굴 픽셀은 머리카락 말고 다른 부위로 넘기지 않는다.
+  // flare 지도가 눈·입을 목이나 옷 색으로 칠하면 눈이 목 레이어로 빠지고 얼굴엔 구멍이 남는다.
+  const chinY = rig.points?.head?.y ?? -1;
   const keyOf = (id) => AI_CLASSES[id - 1]?.key;
   const names = new Array(n);
   let changed = 0;
@@ -96,7 +99,8 @@ export function applyAiLabels(seg, rig, partsResult, ai, { regionShare = 0.88 } 
     const key = keyOf(k);
     let name = old;
     // 팔짱(handwear)은 알고리즘 판단을 지킨다: 좌우로 쪼개면 가슴 고정 리깅이 깨진다.
-    if (key && key !== 'other' && old !== 'handwear') {
+    const faceGuard = old === 'face' && (i - (i % w)) / w < chinY && key !== 'hair' && key !== 'face';
+    if (key && key !== 'other' && old !== 'handwear' && !faceGuard) {
       if (key === 'hair' || key === 'face' || key === 'neck' || key === 'topwear' || key === 'bottomwear') name = key;
       else if (SIDED.has(key)) {
         const oldSide = old && old.startsWith(key + '_') ? old.slice(-1) : null;

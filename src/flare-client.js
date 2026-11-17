@@ -117,8 +117,16 @@ const COVER_TEXT = {
   front_hair: 'hair', face: 'the face', neck: 'the neck', topwear: 'the shirt', sleeve_r: 'a sleeve', sleeve_l: 'a sleeve', arm_r: 'an arm', arm_l: 'an arm',
   handwear: 'the arms', bottomwear: 'the skirt or shorts', footwear_r: 'a shoe', footwear_l: 'a shoe', legwear_r: 'a leg', legwear_l: 'a leg',
 };
+// 파츠별 추가 지시: 얼굴·목은 눈·입이 다른 레이어라서 맨살만 그려야 한다.
+const PART_HINT = {
+  face: 'The eyes, eyebrows, eyelashes, nose and mouth are separate layers, so paint the masked area as smooth bare skin only: no eyes, no eye whites, no mouth, no hair strands. ',
+  neck: 'Paint only plain neck skin that continues upward behind the chin: never draw a face, eyes, mouth, ears or hair. ',
+};
+// 맨살 파츠: 눈·머리카락 같은 진한 그림이 조금만 섞여도 버린다.
+const SKIN_PARTS = new Set(['face', 'neck']);
 export const MIN_REDRAW_PIXELS = 250;
 export const MAX_FOREIGN_SHARE = 0.3;
+export const MAX_FOREIGN_SHARE_SKIN = 0.06;
 
 /** 다시 그릴 레이어: 채운 픽셀이 충분하고 의미가 있는 파츠만 (눈동자·흰자 같은 작은 조각 제외) */
 export function redrawTargets(layers) {
@@ -149,6 +157,7 @@ export function redrawPrompt(label, covering = []) {
     + `The masked area is the part of this ${part} that was covered by ${cover} in the full illustration; the covering parts have been removed and must NOT be drawn. `
     + `Fill the masked area with the ${part} itself, with the same material and colors as its visible part, continuing its outline, cel shading and any folds or pattern `
     + `so it looks like one complete, uncovered ${part} in exactly the same art style. Never paint ${cover} or any clothing, hair, face or object that is not part of the ${part}. `
+    + (PART_HINT[label] || '')
     + 'Keep the plain white background and keep everything outside the mask unchanged.';
 }
 
@@ -224,7 +233,8 @@ export async function redrawHidden({ token, layer, context = [], covering = [], 
     changed++;
   }
   // 안전장치: 다시 그린 자리의 상당 부분이 원래 파츠 색(보간 채움)과 동떨어지면 가리던 옷 등을 그린 것으로 보고 버린다.
-  if (total && far / total > MAX_FOREIGN_SHARE) throw Error(`다시 그린 색이 원래 파츠와 너무 달라 버렸어요 (${Math.round((100 * far) / total)}%)`);
+  const limit = SKIN_PARTS.has(layer.label) ? MAX_FOREIGN_SHARE_SKIN : MAX_FOREIGN_SHARE;
+  if (total && far / total > limit) throw Error(`다시 그린 색이 원래 파츠와 너무 달라 버렸어요 (${Math.round((100 * far) / total)}%)`);
   return { changed, data };
 }
 
