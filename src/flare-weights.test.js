@@ -71,7 +71,7 @@ test('tokens are validated and only named body parts are completed', () => {
   assert.equal(validToken('abc def ghi jkl mno pqr'), false);
   assert.equal(validToken('A'.repeat(40)), true);
   const d = new Uint8ClampedArray(4);
-  const layers = [{ label: 'topwear', data: d }, { label: 'arm_r', data: d }, { label: 'eyewhite_r', data: d }, { label: 'legwear_l', data: null }];
+  const layers = [{ label: 'topwear', data: d }, { label: 'arm_r', data: d }, { label: 'mouth', data: d }, { label: 'legwear_l', data: null }];
   assert.deepEqual(redrawTargets(layers).map((l) => l.label), ['topwear', 'arm_r']);
 });
 

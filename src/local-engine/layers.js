@@ -366,9 +366,10 @@ export function faceDetails(data, w, h, faceMask, lineMask) {
 }
 
 // 앞→뒤 그리기 순서 (layer-studio는 0번이 가장 앞).
+// 눈(눈동자·흰자)은 얼굴 뒤: 얼굴에 눈 구멍을 남겨 두면 시선을 옮겨도 얼굴 가장자리가 눈동자를 잘라 준다(사용자 예시 방식).
 const ORDER = [
-  'front_hair', 'eyebrow_r', 'eyebrow_l', 'eyelash_r', 'eyelash_l', 'eyelash_lower_r', 'eyelash_lower_l', 'irides_r', 'irides_l', 'eyewhite_r', 'eyewhite_l',
-  'mouth', 'nose', 'face',
+  'front_hair', 'eyebrow_r', 'eyebrow_l', 'eyelash_r', 'eyelash_l', 'eyelash_lower_r', 'eyelash_lower_l',
+  'mouth', 'nose', 'face', 'irides_r', 'irides_l', 'eyewhite_r', 'eyewhite_l',
   'handwear', 'sleeve_r', 'sleeve_l', 'arm_r', 'arm_l', 'topwear', 'bottomwear', 'neck',
   'footwear_r', 'footwear_l', 'legwear_r', 'legwear_l', 'back_hair',
 ];
@@ -408,7 +409,10 @@ export function buildLayers(data, w, h, seg, rig, partsResult) {
     // 얼굴: 세부 자리 + 앞머리 밑(이마·옆얼굴)을 피부로
     const faceBox = bboxOf(mask.face, w, h);
     const under = and(get('front_hair'), dilate(mask.face, w, h, faceBox.width * 0.15));
-    fills.face = { target: or(and(dilate(removed, w, h, 1), mask.face), under), source: visible.face };
+    // 눈 뜬 자리(흰자·눈동자)는 채우지 않는다: 얼굴의 눈 구멍으로 뒤의 눈이 보인다.
+    let eyeHole = new Uint8Array(w * h);
+    for (const [name, m] of Object.entries(details)) if (/^(eyewhite|irides)_/.test(name)) eyeHole = or(eyeHole, m);
+    fills.face = { target: minus(or(and(dilate(removed, w, h, 1), mask.face), under), eyeHole), source: visible.face };
     // 흰자: 눈동자·속눈썹 밑을 흰자로 (눈동자가 움직여도 비지 않게)
     for (const side of ['r', 'l']) {
       const eye = details[`_eye_${side}`];

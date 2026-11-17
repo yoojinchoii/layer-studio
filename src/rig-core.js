@@ -2,6 +2,7 @@ import {separateArms,restoreArmChains} from './arm-separation.js';
 import {namedSide,isArmPart,isHeadAccessory,mergedArmRoots} from './part-identity.js';
 import {faceLabels,faceCandidates,faceWeights,splitFaceLids,facialOffsets} from './face-rig.js';
 import {activeIds,activeBone,chainDefs,availableChain,independentArm} from './rig-scope.js';
+import {hairSwaySpec} from './hair-chains.js';
 import {separateSleeve} from './garment-parts.js';
 import {silhouetteTopology} from './mesh-topology.js';
 import {refinementPoints} from './weight-refine.js';
@@ -141,7 +142,9 @@ export function setupPose(rig){
     const pos=at(id);let angle=0,length=0;
     if(id!=='root'){
       const parent=world[rig.parents[id]],to=next&&P[next]?at(next):null,dir=to&&unit(to.x-pos.x,to.y-pos.y);
-      if(dir){angle=Math.atan2(dir.y,dir.x)/D2R;length=Math.hypot(to.x-pos.x,to.y-pos.y);}
+      // 얼굴 뼈는 모두 수평 축(길이 0): 3D 돌리기 제약이 모든 얼굴 뼈를 같은 방향으로 옮기게.
+      if(id.startsWith('face_')){angle=0;length=0;}
+      else if(dir){angle=Math.atan2(dir.y,dir.x)/D2R;length=Math.hypot(to.x-pos.x,to.y-pos.y);}
       else if(id==='pelvis'){angle=-90;const hips=['hip_left','hip_right'].filter(h=>P[h]);length=Math.max(10*s,hips.length?hips.reduce((n,h)=>n+P[h].y,0)/hips.length-P.pelvis.y:30*s);}
       else if(id.startsWith('face_')){angle=0;length=0;}
       else if(id==='head'||id==='hair'){angle=90;length=id==='head'&&P.hair?Math.max(10*s,Math.hypot(P.hair.x-P.head.x,P.hair.y-P.head.y)*1.6):20*s;}
@@ -250,7 +253,8 @@ export function attachProps(rig,layers){
 const slug=s=>String(s).replace(/[^\p{L}\p{N}_-]+/gu,'_').replace(/^_+|_+$/g,'').slice(0,60)||'part';
 // Layers (front-to-back, with RGBA data) become Spine parts: limbs are cut at joints in cutout style.
 export function buildParts(layers,rig){
-  const cutout=(rig.limbStyle??'cutout')==='cutout',parts=[],used=new Map();
+  // 'arms': 사용자 예시처럼 팔만 위팔·아래팔·손 조각으로 나누고 다리·옷은 메쉬로 휜다.
+  const style=rig.limbStyle??'cutout',cutoutFor=mode=>style==='cutout'||style==='arms'&&(mode==='arm_left'||mode==='arm_right'),parts=[],used=new Map();
   const facialLayers=layers.map((l,i)=>!rig.artPrepared&&rig.faceRig>=2&&rig.modes[i]==='face'?splitFaceLids(l,rig):null);
   const separatedLayers=layers.map((l,i)=>rig.artPrepared?[l]:facialLayers[i]||separateArms(l,rig,i)||separateSleeve(l,rig,i)||[l]);
   // A shirt torso must not be weighted as an integrated sleeve when that sleeve is
@@ -260,11 +264,11 @@ export function buildParts(layers,rig){
     const facial=!!facialLayers[i];
     for(const l of separatedLayers[i]){
       const mode=rig.modes[i]==='crossed_arms'?'rigid':facial||l.role==='sleeve'||['separated-arm','separated-hand'].includes(l.role)?l.mode:rig.modes[i],bone=rig.modes[i]==='crossed_arms'?'chest':facial||l.role==='sleeve'||['separated-arm','separated-hand'].includes(l.role)?l.bone:rig.assignments[i];
-      const garment=mode==='face'||mode==='bottoms'||mode==='torso'||mode==='neck'||mode.startsWith('sleeve_'),split=cutout&&!garment&&mode!=='rigid'?splitLimb(l,rig,mode):null;
-      const sides=!cutout&&(mode==='legs'||mode==='feet')&&l.data?splitMeshSides(l,rig,mode):null;
+      const garment=mode==='face'||mode==='bottoms'||mode==='torso'||mode==='neck'||mode.startsWith('sleeve_'),split=cutoutFor(mode)&&!garment&&mode!=='rigid'?splitLimb(l,rig,mode):null;
+      const sides=!cutoutFor(mode)&&(mode==='legs'||mode==='feet')&&l.data?splitMeshSides(l,rig,mode):null;
       if(sides?.length)parts.push(...sides.map(p=>({...p,source:i})));
       else if(split?.length)parts.push(...split.map(p=>({...p,source:i})));
-      else parts.push({...l,source:i,bone,mode:cutout&&!garment?'rigid':mode,...(mode==='torso'?{detachedSleeves}: {})});
+      else parts.push({...l,source:i,bone,mode:cutoutFor(mode)&&!garment?'rigid':mode,...(mode==='torso'?{detachedSleeves}: {})});
     }
   });
   for(const p of parts){p.bone=activeBone(rig,p.bone);const base=slug(p.name),n=(used.get(base)||0)+1;used.set(base,n);p.slot=n>1?`${base}_${n}`:base;}
@@ -456,8 +460,11 @@ export function vertexWeights(attachment,skeleton,boneName){
 // result in Spine matches the browser preview. New animations made in Spine can use the IK as usual.
 function templateAnimations(rig,ikNames,amplitude){
   const P=rig.points,active=new Set(activeIds(rig)),s=rig.height/768,A=amplitude,sin=(p,k=1,ph=0)=>Math.sin((p*k+ph)*2*Math.PI),out={};
+  let energy=1;
   const make=(duration,spec)=>{
     const frames=Math.max(1,Math.round(duration*15)),times=Array.from({length:frames+1},(_,i)=>i/frames),bones={};
+    // 머리 가닥 체인은 모든 모션에서 늦게 따라 흔들린다(2차 움직임)
+    spec={...hairSwaySpec(rig,duration,{amplitude:2.2*A,energy}),...spec};
     for(const [id,tl]of Object.entries(spec)){if(!active.has(id)||/^(arm|elbow|wrist)_(left|right)$/.test(id)&&!independentArm(rig,id.split('_').at(-1)))continue;const o={};
       if(tl.rotate)o.rotate=times.map(p=>({time:round(p*duration),value:round(tl.rotate(p))}));
       for(const key of ['translate','scale'])if(tl[key])o[key]=times.map(p=>{const [x,y]=tl[key](p);return {time:round(p*duration),x:round(x),y:round(y)};});
@@ -466,24 +473,27 @@ function templateAnimations(rig,ikNames,amplitude){
   };
   // o = +1 rotates the screen-right limb outward/up (counter-clockwise); the screen-left limb mirrors it.
   const each=(fn)=>Object.assign({},...[['left',-1],['right',1]].map(([side,o])=>fn(side,o)));
-  const idleSpec={chest:{rotate:p=>sin(p)*.3*A,scale:p=>[1,1+(1-Math.cos(p*2*Math.PI))*.006*A]},head:{rotate:p=>-sin(p,1,-.08)*.65*A},hair:{rotate:p=>sin(p,1,-.15)*A},
-    ...each((side,o)=>({[`arm_${side}`]:{rotate:p=>-o*sin(p)*.75*A},[`elbow_${side}`]:{rotate:p=>-o*sin(p,1,-.1)*1.2*A}}))};
-  out.idle=make(4,idleSpec);
+  const idleSpec={chest:{rotate:p=>sin(p,2)*.3*A,scale:p=>[1,1+(1-Math.cos(p*4*Math.PI))*.006*A]},head:{rotate:p=>-sin(p,2,-.08)*.65*A},hair:{rotate:p=>sin(p,2,-.15)*A},
+    ...each((side,o)=>({[`arm_${side}`]:{rotate:p=>-o*sin(p,2)*.75*A},[`elbow_${side}`]:{rotate:p=>-o*sin(p,2,-.1)*1.2*A}}))};
+  out.idle=make(8,idleSpec);
   // Template motions stay small: a starting point the animator exaggerates, not a finished take.
   out.wave=make(1.6,{chest:{rotate:p=>sin(p)*.8},head:{rotate:p=>sin(p,1,.25)*1.5},hair:{rotate:p=>-sin(p,1,.1)*1.2},
     arm_right:{rotate:p=>40+sin(p)*3},elbow_right:{rotate:p=>25+sin(p,2)*12},wrist_right:{rotate:p=>sin(p,2,-.12)*6},arm_left:{rotate:p=>sin(p)*1}});
-  out.cheer=make(1.2,{body:{translate:p=>[0,(1-Math.cos(p*4*Math.PI))*1.5*s]},head:{rotate:p=>sin(p)*2},hair:{rotate:p=>-sin(p,2,.1)*1.5},
+  energy=1.3;out.cheer=make(1.2,{body:{translate:p=>[0,(1-Math.cos(p*4*Math.PI))*1.5*s]},head:{rotate:p=>sin(p)*2},hair:{rotate:p=>-sin(p,2,.1)*1.5},
     ...each((side,o)=>({[`arm_${side}`]:{rotate:p=>o*(30+sin(p,2)*5)},[`elbow_${side}`]:{rotate:p=>o*(10+sin(p,2,.08)*5)}}))});
   // Hop: crouch → jump → land. The body dip matches how much the bent legs shorten, so feet stay on the ground.
   const crouch=p=>p<.2?Math.sin(Math.PI*p/.2):p>=.75?Math.sin(Math.PI*(p-.75)/.25)*.7:0,air=p=>p>=.2&&p<.75?Math.sin(Math.PI*(p-.2)/.55):0,theta=9;
   const leg=side=>P[`hip_${side}`]&&P[`knee_${side}`]&&P[`ankle_${side}`]?Math.hypot(P[`knee_${side}`].x-P[`hip_${side}`].x,P[`knee_${side}`].y-P[`hip_${side}`].y)+Math.hypot(P[`ankle_${side}`].x-P[`knee_${side}`].x,P[`ankle_${side}`].y-P[`knee_${side}`].y):0;
   const legLength=(leg('left')+leg('right'))/2;
-  out.hop=make(1,{body:{translate:p=>[0,-legLength*(1-Math.cos(theta*crouch(p)*D2R))+air(p)*16*s]},head:{rotate:p=>-crouch(p)*1.5},hair:{rotate:p=>air(p)*3-crouch(p)*1.5},
+  energy=1.8;out.hop=make(1,{body:{translate:p=>[0,-legLength*(1-Math.cos(theta*crouch(p)*D2R))+air(p)*16*s]},head:{rotate:p=>-crouch(p)*1.5},hair:{rotate:p=>air(p)*3-crouch(p)*1.5},
     ...each((side,o)=>({[`hip_${side}`]:{rotate:p=>o*theta*crouch(p)},[`knee_${side}`]:{rotate:p=>-o*2*theta*crouch(p)},[`ankle_${side}`]:{rotate:p=>o*theta*crouch(p)},
       [`arm_${side}`]:{rotate:p=>o*(14*air(p)-4*crouch(p))},[`elbow_${side}`]:{rotate:p=>o*6*air(p)}}))});
-  for(const [key,{duration,spec}]of Object.entries(demoMotionSpecs(rig,setupPose(rig).world,A))){if(key==='idle_face'){out.idle=make(4,{...idleSpec,...spec});continue;}out[key]=make(duration,spec);}
+  energy=1;for(const [key,{duration,spec}]of Object.entries(demoMotionSpecs(rig,setupPose(rig).world,A))){if(key==='idle_face'){out.idle=make(8,{...idleSpec,...spec});continue;}out[key]=make(duration,spec);}
   return Object.fromEntries(availableAnimations(rig).map(key=>[key,out[key]]));
 }
+// 조종 뼈 이동량에 곱할 비율: 코가 가장 많이, 볼은 적게(가까운 것은 많이, 먼 것은 적게 움직이는 시차).
+// 눈·눈썹은 볼(face_left/right)의 자식이라 볼 이동에 더해진다.
+export const FACE_TURN_MIX=[['face_nose',.14],['face_mouth',.11],['face_jaw',.08],['face_left',.06],['face_right',.06],['face_eye_left',.05],['face_eye_right',.05],['face_brow_left',.03],['face_brow_right',.03]];
 export function makeSkeleton(parts,rig,amplitude=1){
   const P=rig.points,root=P.root,setup=setupPose(rig),world=setup.world,active=new Set(activeIds(rig)),order=setup.order.filter(id=>active.has(id));setup.order=order;
   const bones=order.map(id=>{if(id==='root')return {name:'root'};const parent=rig.parents[id],[x,y]=toLocal(world,parent,world[id].x,world[id].y);
@@ -496,6 +506,9 @@ export function makeSkeleton(parts,rig,amplitude=1){
     const cross=(wb.x-wa.x)*(wc.y-wb.y)-(wb.y-wa.y)*(wc.x-wb.x),fallback=kind==='arm'?side==='right':side==='left';
     const name=`ik_${kind}_${side==='left'?'R':'L'}`;ikKeys.set(name,key);ik.push({name,order:ik.length,bones:[spineName(ia),spineName(ib)],target,mix:rig.ikModes?.[key]==='fk'?0:1,bendPositive:Math.abs(cross)>1?cross>0:fallback});
   }
+  // 얼굴 3D 돌리기(사용자 예시 방식): face_turn을 옮기면 얼굴 세부가 서로 다른 비율로 따라와 고개를 돌린 듯 보인다.
+  const transform=[];
+  if(active.has('face_turn'))for(const [id,mix]of FACE_TURN_MIX)if(active.has(id))transform.push({name:`turn_${spineName(id)}`,order:ik.length+transform.length,bones:[spineName(id)],target:spineName('face_turn'),local:true,relative:true,mixRotate:0,mixX:mix,mixY:mix,mixScaleX:0,mixScaleY:0,mixShearY:0});
   const attachments={},slots=[];
   for(let i=parts.length-1;i>=0;i--){const l=parts[i],name=l.slot??`part_${String(i+1).padStart(2,'0')}`,bone=activeBone(rig,l.bone??rig.assignments[i]),mode=l.mode??rig.modes[i];
     const slot={name,bone:spineName(bone)};if(l.visible!==false)slot.attachment=name;slot.color='ffffff'+Math.round((l.opacity??1)*255).toString(16).padStart(2,'0');slots.push(slot);
@@ -510,7 +523,7 @@ export function makeSkeleton(parts,rig,amplitude=1){
   for(const [id,p]of Object.entries(rig.poseScales||{}))if(active.has(id))(manual[spineName(id)]??={}).scale=[{x:p.x,y:p.y}];
   animations.manual_pose={bones:manual};if(ikNames.length)animations.manual_pose.ik=Object.fromEntries(ikNames.map(n=>[n,[{mix:0}]]));
   const skeleton={skeleton:{spine:'4.0.64',x:-rig.width/2,y:0,width:rig.width,height:rig.height,images:'./images/',fps:30},bones,slots};
-  if(ik.length)skeleton.ik=ik;
+  if(ik.length)skeleton.ik=ik;if(transform.length)skeleton.transform=transform;
   const validNames=new Set(bones.map(b=>b.name));for(const anim of Object.values(animations))for(const name of Object.keys(anim.bones||{}))if(!validNames.has(name))delete anim.bones[name];
   // IK edits are also baked into FK rotations. Target keys let Spine retain the selected IK mode.
   const posed=poseMatrices({...skeleton,animations},0,{},'manual_pose');
@@ -526,7 +539,11 @@ export function animationDuration(animation){let d=0;for(const tl of Object.valu
 // World matrices [a,b,c,d,x,y] per bone (Spine coordinates, y up). Pose angles are keyed by Spine bone name.
 export function poseMatrices(skeleton,time=null,pose={},animation='idle',offsets={},scales={}){
   const anim=time===null?null:skeleton.animations[animation],duration=animationDuration(anim),t=duration?(time%duration):0,m={};
-  for(const b of skeleton.bones){const tl=anim?.bones[b.name]||{},angle=((b.rotation||0)+sample(tl.rotate,t,'value',0)+(pose[b.name]||0))*D2R,sx=sample(tl.scale,t,'x',1)*(scales[b.name]?.x??1),sy=sample(tl.scale,t,'y',1)*(scales[b.name]?.y??1),a=Math.cos(angle)*sx,c=-Math.sin(angle)*sy,d=Math.cos(angle)*sy,bb=Math.sin(angle)*sx,x=(b.x||0)+sample(tl.translate,t,'x',0)+(offsets[b.name]?.x||0),y=(b.y||0)+sample(tl.translate,t,'y',0)+(offsets[b.name]?.y||0);
+  // transform 제약(local·relative 이동만): 대상 뼈의 로컬 이동 × 비율을 더한다(Spine과 같은 계산).
+  const extra={};if(skeleton.transform?.length){const byName=new Map(skeleton.bones.map(b=>[b.name,b]));
+    for(const c of skeleton.transform){if(!c.local||!c.relative)continue;const tb=byName.get(c.target);if(!tb)continue;const tl=anim?.bones[tb.name]||{},tx=(tb.x||0)+sample(tl.translate,t,'x',0)+(offsets[tb.name]?.x||0),ty=(tb.y||0)+sample(tl.translate,t,'y',0)+(offsets[tb.name]?.y||0);
+      for(const name of c.bones){const e=extra[name]??={x:0,y:0};e.x+=tx*(c.mixX??1);e.y+=ty*(c.mixY??c.mixX??1);}}}
+  for(const b of skeleton.bones){const tl=anim?.bones[b.name]||{},angle=((b.rotation||0)+sample(tl.rotate,t,'value',0)+(pose[b.name]||0))*D2R,sx=sample(tl.scale,t,'x',1)*(scales[b.name]?.x??1),sy=sample(tl.scale,t,'y',1)*(scales[b.name]?.y??1),a=Math.cos(angle)*sx,c=-Math.sin(angle)*sy,d=Math.cos(angle)*sy,bb=Math.sin(angle)*sx,x=(b.x||0)+sample(tl.translate,t,'x',0)+(offsets[b.name]?.x||0)+(extra[b.name]?.x||0),y=(b.y||0)+sample(tl.translate,t,'y',0)+(offsets[b.name]?.y||0)+(extra[b.name]?.y||0);
     if(!b.parent){m[b.name]=[a,bb,c,d,x,y];continue;}const q=m[b.parent];m[b.name]=[q[0]*a+q[2]*bb,q[1]*a+q[3]*bb,q[0]*c+q[2]*d,q[1]*c+q[3]*d,q[0]*x+q[2]*y+q[4],q[1]*x+q[3]*y+q[5]];
   }return m;
 }

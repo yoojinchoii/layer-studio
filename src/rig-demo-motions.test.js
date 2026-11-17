@@ -9,7 +9,10 @@ const demos=['head_sway','face_gaze','face_expression','upper_sway','upper_gestu
 test('face demos move the intended features, leave clothes fixed and preserve the saved pose',()=>{
  const ls=face(),r=applyBuiltin('bust',ls,200,240).rig;r.pose.head=12;r.poseOffsets={face_mouth:{x:2,y:1}};r.poseScales={head:{x:1.1,y:1.1}};
  const before=JSON.stringify(r),parts=buildParts(ls,r),sk=makeSkeleton(parts,r),rest=poseMatrices(sk),gaze=poseMatrices(sk,1,{},'face_gaze');
- assert.deepEqual(availableAnimations(r),['head_sway','face_gaze','face_expression','idle']);
+ assert.deepEqual(availableAnimations(r),['head_sway','face_turn','face_gaze','face_expression','idle']);
+ // 3D 돌리기: 조종 뼈를 옆으로 옮기면 코가 볼보다 많이 움직인다(시차). 가로로만.
+ const turn=poseMatrices(sk,1,{},'face_turn'),dx=id=>turn[spineName(id)][4]-rest[spineName(id)][4],dy=id=>turn[spineName(id)][5]-rest[spineName(id)][5];
+ assert.ok(sk.transform.length>=5);assert.ok(Math.abs(dx('face_nose'))>Math.abs(dx('face_left'))*1.8&&Math.abs(dx('face_left'))>0.3);assert.ok(Math.abs(dy('face_nose'))<Math.abs(dx('face_nose'))*.2);
  // A quarter-cycle gaze goes horizontally right, even when parent setup axes are rotated.
  assert.ok(gaze.face_pupil_left[4]>rest.face_pupil_left[4]+1);
  assert.ok(Math.abs(gaze.face_pupil_left[5]-rest.face_pupil_left[5])<.005);

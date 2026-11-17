@@ -36,7 +36,7 @@ export function applyArtBindings(rig,layers,report){
     const id=jointMap[key];if(!id||!rig.points[id]||!Array.isArray(point)||point.length!==2||!point.every(v=>Number.isFinite(v)&&v>=0&&v<=1000))continue;
     rig.points[id]={x:point[0]*(rig.width-1)/1000,y:point[1]*(rig.height-1)/1000};
   }
-  rig.artPrepared=true;rig.partBones??={};rig.sleeves={};rig.armSplits={};rig.limbStyle='mesh';rig.meshDensity='balanced';
+  rig.artPrepared=true;rig.partBones??={};rig.sleeves={};rig.armSplits={};rig.limbStyle='arms';rig.meshDensity='balanced';
   const modes=new Set(['rigid','torso','neck','arm_left','arm_right','leg_left','leg_right','sleeve_left','sleeve_right']);
   layers.forEach((l,i)=>{const a=l.art;if(!a)return;
     if(!rig.points[a.bone]||!modes.has(a.mode)||!Array.isArray(a.allowed_bones)||!a.allowed_bones.length||a.allowed_bones.some(b=>!rig.points[b]))throw Error(`${l.name}: 본 연결 정보가 올바르지 않습니다.`);

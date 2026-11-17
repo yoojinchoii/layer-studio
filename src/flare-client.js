@@ -111,6 +111,7 @@ const PART_TEXT = {
   front_hair: 'hair', back_hair: 'back part of the hair seen behind the head', face: 'face skin', neck: 'neck', topwear: 'upper-body clothing (shirt or top)',
   sleeve_r: 'sleeve', sleeve_l: 'sleeve', arm_r: 'arm and hand', arm_l: 'arm and hand', handwear: 'arms and hands',
   bottomwear: 'lower-body clothing (skirt, shorts or trousers)', legwear_r: 'leg', legwear_l: 'leg', footwear_r: 'shoe', footwear_l: 'shoe',
+  irides_r: 'iris and pupil of an eye', irides_l: 'iris and pupil of an eye', eyewhite_r: 'white of an eye', eyewhite_l: 'white of an eye',
 };
 // 앞에서 가리던 파츠 이름(프롬프트에서 "이건 그리지 말라"고 알려 준다)
 const COVER_TEXT = {
@@ -130,6 +131,10 @@ const PART_HINT = {
   legwear_l: 'The leg continues a little upward under the skirt or shorts and downward into the shoe; draw it with its outline. Do not draw the other leg. ',
   bottomwear: 'The waistband continues upward a little under the shirt; draw the hidden top of the garment with its outline. ',
   back_hair: 'Draw the hair mass behind the head and neck that the face and front hair were hiding. ',
+  irides_r: 'Complete the iris and pupil as one full circle or oval with the same rings, colors and highlight style, including the parts hidden under the eyelid skin and lashes. ',
+  irides_l: 'Complete the iris and pupil as one full circle or oval with the same rings, colors and highlight style, including the parts hidden under the eyelid skin and lashes. ',
+  eyewhite_r: 'Complete the white of the eye as one full smooth almond or round shape that continues under the surrounding skin and lashes, plain white with the same soft shading. Do not draw an iris, pupil, lashes or skin. ',
+  eyewhite_l: 'Complete the white of the eye as one full smooth almond or round shape that continues under the surrounding skin and lashes, plain white with the same soft shading. Do not draw an iris, pupil, lashes or skin. ',
 };
 export const MIN_REDRAW_PIXELS = 250;
 // 덮인 자리 중 파츠에서 이 거리(작업 해상도의 비율) 안만 그리게 한다.
@@ -187,7 +192,10 @@ export function completionPlan(layers, layer, { reach = COMPLETE_REACH, pad = 16
     if (!covers.has(f.label)) covers.set(f.label, []);
     covers.get(f.label).push(i);
   }
-  const dist = distanceFrom(vis, W, H), R = Math.max(W, H) * reach;
+  // 닿는 거리: 작업 해상도의 reach 비율, 다만 작은 파츠(눈 등)는 제 크기의 60%까지만(얼굴 전체로 번지지 않게)
+  let bx0 = W, by0 = H, bx1 = -1, by1 = -1;
+  for (let i = 0; i < W * H; i++) if (vis[i]) { const x = i % W, y = (i - x) / W; if (x < bx0) bx0 = x; if (y < by0) by0 = y; if (x > bx1) bx1 = x; if (y > by1) by1 = y; }
+  const dist = distanceFrom(vis, W, H), R = Math.min(Math.max(W, H) * reach, Math.max(8, (Math.max(bx1 - bx0, by1 - by0) + 1) * 0.6));
   let x0 = W, y0 = H, x1 = -1, y1 = -1, editable = 0;
   const editAll = new Uint8Array(W * H);
   for (let i = 0; i < W * H; i++) {
@@ -217,12 +225,12 @@ export function completionPlan(layers, layer, { reach = COMPLETE_REACH, pad = 16
 
 const WHITE = [255, 255, 255], MAGENTA = [255, 0, 255];
 /** 배경색: 흰색 계열 파츠(흰 옷 등)는 자홍색 배경, 나머지는 흰 배경. */
-export function backgroundFor(plan) {
-  let r = 0, g = 0, b = 0, n = 0;
-  for (let i = 0; i < plan.visible.length; i++) if (plan.visible[i] && plan.color[i * 4 + 3] > 200) { r += plan.color[i * 4]; g += plan.color[i * 4 + 1]; b += plan.color[i * 4 + 2]; n++; }
-  if (!n) return { rgb: WHITE, name: 'white' };
-  const light = Math.hypot(255 - r / n, 255 - g / n, 255 - b / n) < 60;
-  return light ? { rgb: MAGENTA, name: 'magenta' } : { rgb: WHITE, name: 'white' };
+export function backgroundFor(plan, label = '') {
+  // 흰 계열 픽셀이 조금이라도 많으면(흰자·흰 옷 — 그늘진 흰자는 평균색이 어두워도 대부분 희다) 자홍색 배경
+  if (/^eyewhite/.test(label)) return { rgb: MAGENTA, name: 'magenta' };
+  let light = 0, n = 0;
+  for (let i = 0; i < plan.visible.length; i++) if (plan.visible[i] && plan.color[i * 4 + 3] > 200) { n++; if (Math.hypot(255 - plan.color[i * 4], 255 - plan.color[i * 4 + 1], 255 - plan.color[i * 4 + 2]) < 60) light++; }
+  return n && light / n > 0.25 ? { rgb: MAGENTA, name: 'magenta' } : { rgb: WHITE, name: 'white' };
 }
 
 export function completionPrompt(label, covering = [], bgName = 'white', { plain = false } = {}) {
@@ -248,12 +256,23 @@ export function completionPrompt(label, covering = [], bgName = 'white', { plain
  */
 export function mergeCompletion(plan, result, bg = WHITE) {
   const { w, h, visible, edit, color } = plan, n = w * h;
-  const alpha = new Float32Array(n), rgb = new Float32Array(n * 3);
+  const alpha = new Float32Array(n), rgb = new Float32Array(n * 3), dist = new Float32Array(n);
+  for (let i = 0; i < n; i++) if (edit[i]) dist[i] = Math.hypot(result[i * 4] - bg[0], result[i * 4 + 1] - bg[1], result[i * 4 + 2] - bg[2]);
+  // 안쪽은 불투명, 가장자리(배경과 맞닿은 1~2px)만 배경과 섞인 정도로 알파를 매기고 배경색을 걷어 낸다.
+  // 섞인 정도의 기준은 가장자리 바로 안쪽 파츠색과 배경의 거리(흰 바탕 살색 ~80, 자홍 바탕 흰자 ~255).
+  const solidPx = (i) => dist[i] > 16;
   for (let i = 0; i < n; i++) {
-    if (!edit[i]) continue;
-    const r = result[i * 4], g = result[i * 4 + 1], b = result[i * 4 + 2];
-    const a = Math.min(1, Math.max(0, (Math.hypot(r - bg[0], g - bg[1], b - bg[2]) - 12) / 28));
-    if (a <= 0) continue;
+    if (!edit[i] || !solidPx(i)) continue;
+    const x = i % w, y = (i - x) / w;
+    let edge = false, ref = 0;
+    for (let dy = -2; dy <= 2; dy++) for (let dx = -2; dx <= 2; dx++) {
+      const nx = x + dx, ny = y + dy; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+      const j = ny * w + nx;
+      if (edit[j] && !solidPx(j) && Math.abs(dx) <= 1 && Math.abs(dy) <= 1) edge = true;
+      const d = edit[j] ? dist[j] : visible[j] ? Math.hypot(color[j * 4] - bg[0], color[j * 4 + 1] - bg[1], color[j * 4 + 2] - bg[2]) : 0;
+      if (d > ref) ref = d;
+    }
+    const a = edge ? Math.min(1, dist[i] / Math.max(40, ref)) : 1;
     alpha[i] = a;
     for (let k = 0; k < 3; k++) rgb[i * 3 + k] = Math.min(255, Math.max(0, (result[i * 4 + k] - bg[k] * (1 - a)) / a));
   }
@@ -351,7 +370,7 @@ export async function completePart({ token, layers, layer, signal }) {
   const plan = completionPlan(layers, layer);
   if (!plan || plan.editable < MIN_REDRAW_PIXELS) return null;
   const { w, h } = plan, size = flareSize(w, h), t = fitTransform(w, h, size[0], size[1]);
-  const bg = backgroundFor(plan), css = `rgb(${bg.rgb.join(',')})`;
+  const bg = backgroundFor(plan, layer.label), css = `rgb(${bg.rgb.join(',')})`;
   const crop = make(w, h);
   crop.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(plan.color), w, h), 0, 0);
   const scene = make(size[0], size[1]), sctx = scene.getContext('2d');

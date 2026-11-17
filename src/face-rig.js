@@ -1,4 +1,5 @@
 import {isHeadAccessory} from './part-identity.js';
+import {hairChainIds,hairChainWeights} from './hair-chains.js';
 // FaceRig reference: separate head/face controls, local sprite influences, sparse facial meshes.
 export const faceLabels={face_root:'얼굴 전체',face_left:'오른 볼 (화면 왼쪽)',face_right:'왼 볼 (화면 오른쪽)',face_nose:'코',face_jaw:'턱',face_mouth:'입',face_eye_left:'오른 눈 (화면 왼쪽)',face_eye_right:'왼 눈 (화면 오른쪽)',face_brow_left:'오른 눈썹 (화면 왼쪽)',face_brow_right:'왼 눈썹 (화면 오른쪽)',face_pupil_left:'오른 눈동자 (화면 왼쪽)',face_pupil_right:'왼 눈동자 (화면 오른쪽)'};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
@@ -25,7 +26,7 @@ export function facePartKind(name){
   if(/eye|흰자|안구|눈/.test(n))return 'eye';
   if(/nose|코/.test(n))return 'nose';if(/mouth|lip|입/.test(n))return 'mouth';return null;
 }
-const added={face_lid_upper_left:'오른 위 눈꺼풀',face_lid_lower_left:'오른 아래 눈꺼풀',face_lid_upper_right:'왼 위 눈꺼풀',face_lid_lower_right:'왼 아래 눈꺼풀',face_hair_front:'앞머리',face_hair_back:'뒷머리'};
+const added={face_turn:'얼굴 돌리기 (3D 조종)',face_lid_upper_left:'오른 위 눈꺼풀',face_lid_lower_left:'오른 아래 눈꺼풀',face_lid_upper_right:'왼 위 눈꺼풀',face_lid_lower_right:'왼 아래 눈꺼풀',face_hair_front:'앞머리',face_hair_back:'뒷머리'};
 Object.assign(faceLabels,added);
 export function configureFace(rig,layers){
   const ls=framedLayers(layers),W=rig.width,H=rig.height,P=rig.points,find=re=>ls.find(l=>re.test(l.name));
@@ -34,7 +35,7 @@ export function configureFace(rig,layers){
   P.body=point(cx,(shirt?shirt.y+shirt.height:H)-1);rig.labels.body='흉상 기준';P.chest=point(cx,shirt?shirt.y+shirt.height*.6:H*.88);rig.parents.chest='body';
   P.neck=point(cx,neck?neck.y+neck.height*.86:face.y+face.height*1.08);P.head=at(.5,.97);P.hair=hair?point(hair.x+hair.width/2,hair.y+hair.height*.2):at(.5,.1);
   const active=new Set(['root','body','chest','neck','head']),add=(id,p,parent='face_root')=>{P[id]=p;rig.parents[id]=parent;rig.labels[id]=faceLabels[id];active.add(id);};
-  add('face_root',at(.5,.5),'head');add('face_left',at(.18,.62));add('face_right',at(.82,.62));add('face_nose',at(.5,.59));add('face_jaw',at(.5,.91));
+  add('face_root',at(.5,.5),'head');add('face_turn',at(.5,.5));add('face_left',at(.18,.62));add('face_right',at(.82,.62));add('face_nose',at(.5,.59));add('face_jaw',at(.5,.91));
   const both=l=>/^(eye|pupil|brow|lids|lid_upper|lid_lower)$/.test(facePartKind(l.name))&&l.width>face.width*.55&&l.x<cx&&l.x+l.width>cx;
   const details=ls.flatMap(l=>both(l)?[{...l,width:cx-l.x},{...l,x:cx,width:l.x+l.width-cx}]:[l]).map(l=>({...l,kind:facePartKind(l.name)})),eyeBoxes={};
   for(const which of ['left','right']){
@@ -70,7 +71,7 @@ export function faceCandidates(rig,bone,index){
   if(index!==undefined&&rig.faceBindings?.[index])return rig.faceBindings[index].filter(id=>rig.points[id]&&rig.activeBones.includes(id));
   const available=ids=>ids.filter(id=>rig.points[id]&&(!rig.activeBones||rig.activeBones.includes(id)));
   if(bone==='face_root')return available(['face_root','face_left','face_right','face_nose','face_jaw','face_mouth','face_eye_left','face_eye_right','face_brow_left','face_brow_right']);
-  if(bone==='hair'||bone.startsWith('face_hair_'))return available([bone,'head']);
+  if(bone==='hair'||bone.startsWith('face_hair_'))return available([bone,'head',...hairChainIds(rig,bone)]);
   const m=bone.match(/^face_(eye|lid_upper|lid_lower|pupil)_(left|right)$/);
   if(m){const side=m[2];return available(m[1]==='pupil'?[bone]:[`face_eye_${side}`,`face_lid_upper_${side}`,`face_lid_lower_${side}`]);}
   if(bone==='face_left'||bone==='face_right')return available([bone,'face_root']);
@@ -111,7 +112,9 @@ export function faceWeights(layer,rig,bone,x,y){const weights=rawFaceWeights(lay
 function rawFaceWeights(layer,rig,bone,x,y){
   const requested=rig.partBones?.[layer.source],ids=faceCandidates(rig,bone).filter(id=>!requested||requested.includes(id));if(!ids.length)ids.push(bone);if(ids.length===1)return [[ids[0],1]];
   const P=rig.points,fw=rig.faceGeometry?.face?.width||Math.max(20,Math.abs(P.face_left.x-P.face_right.x)*1.5),smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
-  if(bone==='hair'||bone.startsWith('face_hair_')){const w=smooth((y-layer.y)/Math.max(1,layer.height));return [[ids.includes('head')?'head':bone,1-w],[bone,w]].filter(([,v])=>v>0);}
+  if(bone==='hair'||bone.startsWith('face_hair_')){const w=smooth((y-layer.y)/Math.max(1,layer.height)),base=[[ids.includes('head')?'head':bone,1-w],[bone,w]].filter(([,v])=>v>0);
+    // 늘어진 가닥은 체인 마디를 따른다(사용자 예시처럼 끝으로 갈수록 늦게 흔들림)
+    return (hairChainWeights(rig,bone,x,y,base)||base).filter(([id,v])=>v>0&&(ids.includes(id)||base.some(b=>b[0]===id)));}
   if(/^face_(eye|lid_)/.test(bone)){
     const which=bone.endsWith('left')?'left':'right',eye=`face_eye_${which}`,b=rig.faceGeometry?.eyes?.[which]||{x:layer.x,y:layer.y,width:layer.width,height:layer.height};
     const center=1-smooth(Math.abs(x-(b.x+b.width/2))/(b.width*.5));
@@ -121,7 +124,13 @@ function rawFaceWeights(layer,rig,bone,x,y){
   if(bone!=='face_root'){const total=ids.length;return ids.map(id=>[id,1/total]);}
   // Compact supports, with an anchored base. Distant points never pull the entire face.
   const weights=ids.filter(id=>id!=='face_root').map(id=>{const p=P[id],feature=/eye|brow|mouth|nose/.test(id),rx=fw*(feature?.22:.48),ry=fw*(feature?.15:.4),d=Math.hypot((x-p.x)/rx,(y-p.y)/ry),w=(1-smooth(d))*(feature?.8:.5);return [id,w];}).filter(([,w])=>w>.001).sort((a,b)=>b[1]-a[1]).slice(0,3);
-  const total=weights.reduce((s,[,w])=>s+w,0),factor=total>.9?.9/total:1;return [['face_root',1-total*factor],...weights.map(([id,w])=>[id,w*factor])].filter(([id,w])=>ids.includes(id)&&w>0);
+  const total=weights.reduce((s,[,w])=>s+w,0),factor=total>.9?.9/total:1,base=[['face_root',1-total*factor],...weights.map(([id,w])=>[id,w*factor])].filter(([id,w])=>ids.includes(id)&&w>0);
+  // 눈 구멍 둘레는 눈 뼈를 100% 따른다: 눈(흰자·눈동자)은 얼굴 뒤에 있어, 얼굴 구멍과 눈이 같은 양만큼 움직여야 어긋나지 않는다.
+  for(const which of ['left','right']){const e=rig.faceGeometry?.eyes?.[which],id=`face_eye_${which}`;if(!e||!ids.includes(id))continue;
+    const r=Math.hypot((x-(e.x+e.width/2))/(e.width/2),(y-(e.y+e.height/2))/(e.height/2)),s=1-smooth((r-1.3)/.6);if(s<=0)continue;
+    const own=s+(base.find(([b])=>b===id)?.[1]||0)*(1-s),rest=base.filter(([b])=>b!==id).sort((a,b)=>b[1]-a[1]).slice(0,3),sum=rest.reduce((n,[,w])=>n+w,0)||1;
+    return [...rest.map(([b,w])=>[b,w/sum*(1-own)]),[id,own]].filter(([,w])=>w>0);}
+  return base;
 }
 
 // Reference lid transforms follow pupil translation partially; bake this contribution in manual_pose.
