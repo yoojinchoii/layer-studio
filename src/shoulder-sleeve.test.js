@@ -25,3 +25,14 @@ test('sleeves bend from the chest to the upper arm instead of turning rigidly', 
     assert.deepEqual(l.art.allowed_bones, ['chest', name === 'sleeve_r' ? 'arm_left' : 'arm_right']);
   }
 });
+
+// 손가락이 손목보다 가늘어서, 예전에는 반신 샘플의 손목이 손끝 근처(팔 레이어 높이의 89%)에 잡혔다.
+test('wrists sit where the hand starts, not near the fingertips', () => {
+  for (const file of ['sample-character.png', 'sample-half-body.png']) {
+    const { img, out } = run(file);
+    for (const [key, name] of [['wrist_R', 'arm_r'], ['wrist_L', 'arm_l']]) {
+      const arm = out.layers.find((l) => l.label === name), y = out.pipeline.analysis.joints[key][1] * (img.height - 1) / 1000;
+      assert.ok(y < arm.y + arm.height * 0.8, `${file} ${key} y=${y.toFixed(0)} arm ${arm.y}..${arm.y + arm.height}`);
+    }
+  }
+});

@@ -433,7 +433,15 @@ export function fitJoints(fg, w, h) {
       while (s < n - 1 && dt[limb[s]] > armR * 1.4) s++;
     }
     const len = n - s;
-    const wrist = argBy(limb, dt, s + len * 0.65, s + len * 0.9, smaller);
+    // 손목: 손바닥(끝쪽 40% 안의 가장 두꺼운 곳) 바로 앞의 가장 가는 곳. 손가락은 손목보다 가늘어서
+    // 끝쪽 구간의 최솟값만 고르면 손끝이 잡힌다. 손목이 여러 칸 비슷하게 가늘면 손바닥 쪽 끝(손이 시작되는 곳).
+    let wrist = argBy(limb, dt, s + len * 0.65, s + len * 0.9, smaller);
+    const palm = argBy(limb, dt, s + len * 0.6, n - 1, larger);
+    const neck = argBy(limb, dt, s + len * 0.5, palm, smaller);
+    if (palm > neck && dt[limb[palm]] > dt[limb[neck]] * 1.2) {
+      wrist = neck;
+      while (wrist + 1 < palm && dt[limb[wrist + 1]] <= dt[limb[neck]] * 1.08) wrist++;
+    }
     // A포즈의 꺾임점은 팔이 몸통에서 떨어지는 겨드랑이 높이다(반팔이면 소매 끝 = 팔뚝 중간).
     // 실제 어깨 관절(소매 윗부분 둥근 곳 가운데)은 팔 축을 따라 팔 반지름의 약 1.8배 위에 있다. 어깨 윗선은 넘지 않는다.
     let shoulder = P(limb[s]);
