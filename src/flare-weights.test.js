@@ -3,7 +3,8 @@ import assert from 'node:assert/strict';
 import { weightDistance, refinementPoints } from './weight-refine.js';
 import { normalizeBound } from './rig-core.js';
 import { AI_CLASSES, classifyMap, segmentationPrompt, applyAiLabels } from './local-engine/ai-labels.js';
-import { flareSize, fitTransform, validToken, redrawTargets, completionPlan, mergeCompletion, completionPrompt, backgroundFor, trimLimbRoot } from './flare-client.js';
+import { flareSize, fitTransform, validToken, redrawTargets, completionPlan, mergeCompletion, completionPrompt, backgroundFor, trimLimbRoot, eyelidPlan, buildEyelid, stripLashBand, tidyFaceRim, paintUnderLash } from './flare-client.js';
+import { facePartKind } from './face-rig.js';
 
 test('weight distance is 0 for equal weights and 1 for disjoint bones', () => {
   assert.equal(weightDistance(new Map([['a', 1]]), new Map([['a', 1]])), 0);
@@ -161,4 +162,42 @@ test('legs open only the ankle inside the shoe, eyes only near the eye', () => {
   const white = rect('eyewhite_r', 20, 20, 20, 20, [250, 250, 250]);
   const ep = completionPlan([lid, white], white, { reach: 1, pad: 0 });
   assert.ok(ep.w <= 20 + 2 * 8); // 눈 크기의 30%(최소 8px)까지, 예전 60%면 44
+});
+
+test('flare eyelid hides above the eye at rest and covers the whole opening after dropping S', () => {
+  const white = rect('eyewhite_r', 20, 20, 10, 6, [250, 250, 250]);
+  const face = rect('face', 0, 0, 60, 60, [240, 205, 185]);
+  const plan = eyelidPlan([face, white], 'r');
+  assert.equal(plan.S, 6); assert.equal(plan.minTop, 20);
+  const skin = new Uint8ClampedArray(plan.crop.w * plan.crop.h * 4); for (let i = 0; i < skin.length; i += 4) skin.set([238, 200, 180, 255], i);
+  const lid = buildEyelid(plan, skin, [240, 205, 185]);
+  assert.equal(lid.label, 'eyelid_r'); assert.equal(lid.y, 14); assert.equal(lid.lidDrop, 6);
+  assert.ok(lid.y + lid.height <= 20); // 평소엔 눈 뜬 자리(20~25) 위에 숨는다
+  for (let x = 0; x < lid.width; x++) { let n = 0; for (let y = 0; y < lid.height; y++) if (lid.data[(y * lid.width + x) * 4 + 3]) n++; assert.equal(n, 6); }
+  const eyeAgain = new Uint8ClampedArray(skin.length).fill(255);
+  assert.equal(buildEyelid(plan, eyeAgain, [240, 205, 185]), null); // 눈을 그대로 그리면 버림
+  assert.equal(facePartKind('eyelid_r'), 'lid_cover'); assert.equal(facePartKind('eyelash_r'), 'lids');
+  const lash = rect('eyelash_r', 0, 0, 2, 2, [0, 0, 0], new Uint8Array([0, 1, 1, 0]));
+  assert.equal(stripLashBand(lash), 2); assert.equal(lash.data[7], 0); assert.equal(lash.data[3], 255);
+});
+
+test('light face pixels around the eye hole are pulled to skin so no white ring shows when the eye closes', () => {
+  const face = rect('face', 0, 0, 60, 60, [240, 205, 185]);
+  const white = rect('eyewhite_r', 20, 20, 10, 6, [250, 250, 250]);
+  face.data.set([250, 245, 240, 230], (19 * 60 + 24) * 4); // 구멍 바로 위 밝은 테두리
+  face.data.set([250, 245, 240, 255], (10 * 60 + 24) * 4); // 멀리 있는 밝은 점은 그대로
+  for (let y = 20; y < 26; y++) for (let x = 20; x < 30; x++) face.data[(y * 60 + x) * 4 + 3] = 0; // 눈 구멍
+  const plan = eyelidPlan([face, white], 'r');
+  assert.ok(tidyFaceRim(face, plan, [240, 205, 185]) >= 1);
+  const i = (19 * 60 + 24) * 4; assert.ok(face.data[i + 1] < 220); assert.equal(face.data[i + 3], 255);
+  assert.equal(face.data[(10 * 60 + 24) * 4 + 1], 245);
+});
+
+test('face pixels under the upper lash take the closed-eye drawing, the eye hole stays open', () => {
+  const face = rect('face', 0, 0, 20, 20, [240, 205, 185]);
+  face.data[(12 * 20 + 5) * 4 + 3] = 0; // 눈 구멍
+  const lash = rect('eyelash_r', 2, 10, 8, 3, [20, 20, 20]);
+  const plan = { crop: { x: 0, y: 0, w: 20, h: 20 } }, result = new Uint8ClampedArray(20 * 20 * 4).fill(200);
+  assert.equal(paintUnderLash(face, lash, plan, result), 23);
+  assert.equal(face.data[(10 * 20 + 3) * 4], 200); assert.equal(face.data[(12 * 20 + 5) * 4 + 3], 0); assert.equal(face.data[(5 * 20 + 3) * 4], 240);
 });

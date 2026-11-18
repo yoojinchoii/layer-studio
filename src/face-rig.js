@@ -21,12 +21,14 @@ export function detectFrame(layers,width,height){
 export function facePartKind(name){
   const n=name.split('/').at(-1).toLowerCase();
   if(/brow|눈썹/.test(n))return 'brow';
+  // flare가 그린 눈꺼풀(얼굴 뒤, 깜빡일 때 위 눈꺼풀 뼈를 따라 내려옴)
+  if(/^eyelid(?:_|$)/.test(n))return 'lid_cover';
   if(/iris|irides|pup|눈동자|highlight/.test(n))return 'pupil';
   if(/lash|lid|눈꺼풀|속눈썹/.test(n))return /low|lower|bottom|아래/.test(n)?'lid_lower':/up|upper|top|위/.test(n)?'lid_upper':'lids';
   if(/eye|흰자|안구|눈/.test(n))return 'eye';
   if(/nose|코/.test(n))return 'nose';if(/mouth|lip|입/.test(n))return 'mouth';return null;
 }
-const added={face_turn:'얼굴 돌리기 (3D 조종)',face_lid_upper_left:'오른 위 눈꺼풀',face_lid_lower_left:'오른 아래 눈꺼풀',face_lid_upper_right:'왼 위 눈꺼풀',face_lid_lower_right:'왼 아래 눈꺼풀',face_hair_front:'앞머리',face_hair_back:'뒷머리'};
+const added={face_turn:'얼굴 돌리기 (3D 조종)',face_lid_upper_left:'오른 위 눈꺼풀',face_lid_lower_left:'오른 아래 눈꺼풀',face_lid_upper_right:'왼 위 눈꺼풀',face_lid_lower_right:'왼 아래 눈꺼풀',face_lid_cover_left:'오른 눈꺼풀 그림 (감을 때 덮음)',face_lid_cover_right:'왼 눈꺼풀 그림 (감을 때 덮음)',face_hair_front:'앞머리',face_hair_back:'뒷머리'};
 Object.assign(faceLabels,added);
 export function configureFace(rig,layers){
   const ls=framedLayers(layers),W=rig.width,H=rig.height,P=rig.points,find=re=>ls.find(l=>re.test(l.name));
@@ -36,14 +38,19 @@ export function configureFace(rig,layers){
   P.neck=point(cx,neck?neck.y+neck.height*.86:face.y+face.height*1.08);P.head=at(.5,.97);P.hair=hair?point(hair.x+hair.width/2,hair.y+hair.height*.2):at(.5,.1);
   const active=new Set(['root','body','chest','neck','head']),add=(id,p,parent='face_root')=>{P[id]=p;rig.parents[id]=parent;rig.labels[id]=faceLabels[id];active.add(id);};
   add('face_root',at(.5,.5),'head');add('face_turn',at(.5,.5));add('face_left',at(.18,.62));add('face_right',at(.82,.62));add('face_nose',at(.5,.59));add('face_jaw',at(.5,.91));
-  const both=l=>/^(eye|pupil|brow|lids|lid_upper|lid_lower)$/.test(facePartKind(l.name))&&l.width>face.width*.55&&l.x<cx&&l.x+l.width>cx;
-  const details=ls.flatMap(l=>both(l)?[{...l,width:cx-l.x},{...l,x:cx,width:l.x+l.width-cx}]:[l]).map(l=>({...l,kind:facePartKind(l.name)})),eyeBoxes={};
+  const both=l=>/^(eye|pupil|brow|lids|lid_upper|lid_lower|lid_cover)$/.test(facePartKind(l.name))&&l.width>face.width*.55&&l.x<cx&&l.x+l.width>cx;
+  const lidDrop={},lashDrop={},details=ls.flatMap(l=>both(l)?[{...l,width:cx-l.x},{...l,x:cx,width:l.x+l.width-cx}]:[l]).map(l=>({...l,kind:facePartKind(l.name)})),eyeBoxes={};
   for(const which of ['left','right']){
-    const local=details.filter(l=>side(l)===which),white=local.find(l=>l.kind==='eye'),iris=local.find(l=>l.kind==='pupil'),lash=local.find(l=>l.kind?.startsWith('lid')),brow=local.find(l=>l.kind==='brow');
+    const local=details.filter(l=>side(l)===which),white=local.find(l=>l.kind==='eye'),iris=local.find(l=>l.kind==='pupil'),lash=local.find(l=>l.kind?.startsWith('lid')&&l.kind!=='lid_cover'),brow=local.find(l=>l.kind==='brow');
     const eye=white||iris||lash;if(!eye&&!brow)continue;
     const box=eye||brow;eyeBoxes[which]={x:box.x,y:box.y,width:box.width,height:box.height};
     add(`face_eye_${which}`,eye?center(eye):at(which==='left'?.28:.72,.4),`face_${which}`);
     if(iris)add(`face_pupil_${which}`,center(iris),`face_eye_${which}`);
+    // 눈꺼풀 그림(H = 레이어 높이)은 평소 H만큼 위에 있으므로 얼굴 눈 구멍 아래끝 = y + 2H - 1.
+    // 위 속눈썹은 제 아래끝이 그 구멍 아래끝(flare가 그린 감은 눈 선 자리)에 닿을 만큼 내려온다(리깅 화면은 파츠 크기만 알므로 상자로 잰다).
+    const up=local.find(l=>l.kind==='lids'||l.kind==='lid_upper'),coverBox=local.find(l=>l.kind==='lid_cover');
+    if(up&&coverBox){const H=coverBox.height,D=coverBox.y+2*H-1-(up.y+up.height-1);lashDrop[which]=Math.max(H*.3,Math.min(H*.9,D));}
+    const coverD=local.find(l=>l.kind==='lid_cover');if(coverD){lidDrop[which]=coverD.height;add(`face_lid_cover_${which}`,point(coverD.x+coverD.width/2,coverD.y+coverD.height/2),`face_eye_${which}`);}
     if(brow)add(`face_brow_${which}`,center(brow),`face_eye_${which}`);
     for(const vertical of ['upper','lower']){
       const l=local.find(l=>l.kind===`lid_${vertical}`)||local.find(l=>l.kind==='lids');if(!l)continue;
@@ -54,7 +61,7 @@ export function configureFace(rig,layers){
   for(const which of ['front','back']){const l=ls.find(l=>/hair|머리카락/i.test(l.name)&&(/back|뒤|뒷/i.test(l.name)?'back':'front')===which);if(l)add(`face_hair_${which}`,point(l.x+l.width/2,l.y+l.height*.72),'head');}
   // Keep dormant schema points for older templates, but never display or bind absent facial parts.
   for(const id of Object.keys(faceLabels))if(!P[id]){P[id]=at(.5,.5);rig.parents[id]='face_root';rig.labels[id]=faceLabels[id];}
-  rig.activeBones=[...active];rig.faceRig=2;rig.faceGeometry={face,eyes:eyeBoxes};rig.pose={};rig.poseOffsets={};rig.sleeves={};rig.partBones={};rig.faceBindings={};
+  rig.activeBones=[...active];rig.faceRig=2;rig.faceGeometry={face,eyes:eyeBoxes,...(Object.keys(lidDrop).length?{lidDrop}:{}),...(Object.keys(lashDrop).length?{lashDrop}:{})};rig.pose={};rig.poseOffsets={};rig.sleeves={};rig.partBones={};rig.faceBindings={};
   rig.assignments=layers.map((l,i)=>{
     const b=pixelBounds(l)||l,n=l.name,kind=facePartKind(n),which=side(b);let bone='chest',mode='rigid',allowed=null;
     if(isHeadAccessory(n)){bone='head';allowed=['head'];}
@@ -72,8 +79,8 @@ export function faceCandidates(rig,bone,index){
   const available=ids=>ids.filter(id=>rig.points[id]&&(!rig.activeBones||rig.activeBones.includes(id)));
   if(bone==='face_root')return available(['face_root','face_left','face_right','face_nose','face_jaw','face_mouth','face_eye_left','face_eye_right','face_brow_left','face_brow_right']);
   if(bone==='hair'||bone.startsWith('face_hair_'))return available([bone,'head',...hairChainIds(rig,bone)]);
-  const m=bone.match(/^face_(eye|lid_upper|lid_lower|pupil)_(left|right)$/);
-  if(m){const side=m[2];return available(m[1]==='pupil'?[bone]:[`face_eye_${side}`,`face_lid_upper_${side}`,`face_lid_lower_${side}`]);}
+  const m=bone.match(/^face_(eye|lid_upper|lid_lower|lid_cover|pupil)_(left|right)$/);
+  if(m){const side=m[2];return available(m[1]==='pupil'||m[1]==='lid_cover'?[bone]:[`face_eye_${side}`,`face_lid_upper_${side}`,`face_lid_lower_${side}`]);}
   if(bone==='face_left'||bone==='face_right')return available([bone,'face_root']);
   return [bone];
 }
@@ -118,7 +125,7 @@ function rawFaceWeights(layer,rig,bone,x,y){
   if(/^face_(eye|lid_)/.test(bone)){
     const which=bone.endsWith('left')?'left':'right',eye=`face_eye_${which}`,b=rig.faceGeometry?.eyes?.[which]||{x:layer.x,y:layer.y,width:layer.width,height:layer.height};
     const center=1-smooth(Math.abs(x-(b.x+b.width/2))/(b.width*.5));
-    if(bone.startsWith('face_lid_')){const w=bone.startsWith('face_lid_upper_')?1:.9*center;return [[eye,1-w],[bone,w]].filter(([id,v])=>ids.includes(id)&&v>0).map((v,i,a)=>[v[0],v[1]/a.reduce((n,q)=>n+q[1],0)]);}
+    if(bone.startsWith('face_lid_')){const w=/^face_lid_(upper|cover)_/.test(bone)?1:.9*center;return [[eye,1-w],[bone,w]].filter(([id,v])=>ids.includes(id)&&v>0).map((v,i,a)=>[v[0],v[1]/a.reduce((n,q)=>n+q[1],0)]);}
     const upper=`face_lid_upper_${which}`,lower=`face_lid_lower_${which}`,id=y<P[eye].y?upper:lower,w=0;return [[eye,1-w],[id,w]].filter(([id,v])=>ids.includes(id)&&v>0);
   }
   if(bone!=='face_root'){const total=ids.length;return ids.map(id=>[id,1/total]);}

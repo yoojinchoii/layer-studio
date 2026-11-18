@@ -30,3 +30,14 @@ test('old half-body templates gain facial bindings and new templates retain edit
  const ls=layers(),old=createRigTemplate(legacy(ls),ls,'기존 상반신'),migrated=applyRigTemplate(old,ls,200,250).rig;assert.ok(migrated.activeBones.includes('face_mouth'));assert.equal(migrated.modes[5],'face');
  migrated.points.face_mouth.x+=4;const t=createRigTemplate(migrated,ls,'상체와 얼굴'),next=applyRigTemplate(t,ls,200,250).rig;assert.ok(Math.abs(next.points.face_mouth.x-migrated.points.face_mouth.x)<.001);assert.ok(availableAnimations(next).includes('face_gaze'));
 });
+test('flare eyelid layer follows the upper lid bone and blinking drops it by its own height',()=>{
+ const ls=[...layers(),layer('eyelid_r',58,40,28,9)],r=applyBuiltin('half',ls,200,250).rig,i=ls.length-1;
+ assert.equal(r.assignments[i],'face_lid_cover_left');assert.equal(r.faceGeometry.lidDrop.left,9);
+ const sk=makeSkeleton(buildParts(ls,r),r),rest=poseMatrices(sk),shut=poseMatrices(sk,4*.515,{},'face_expression'),b=spineName('face_lid_cover_left');
+ assert.ok(Math.abs(Math.hypot(shut[b][4]-rest[b][4],shut[b][5]-rest[b][5])-9)<.5);
+});
+test('saved projects with the arm-pieces limb style reopen',()=>{
+ const ls=layers(),r=applyBuiltin('half',ls,200,250).rig;r.limbStyle='arms';
+ const saved={format:'layer-studio-rig-v2',rig:r,strength:1,amplitude:1,layers:ls.map(({data,...l})=>({...l,image:'data:image/png;base64,AA=='}))};
+ assert.doesNotThrow(()=>validateProject(JSON.parse(JSON.stringify(saved))));
+});

@@ -36,14 +36,24 @@ export function demoMotionSpecs(rig,world,amplitude){
   };
   for(const side of ['left','right']){
     const eye=rig.faceGeometry?.eyes?.[side],w=eye?.width||fw*.18,h=eye?.height||fh*.08,pupil=`face_pupil_${side}`,brow=`face_brow_${side}`;
+    // 감을 때 위 속눈썹이 내려오는 거리: 위 속눈썹 아래끝 → 아래 속눈썹 위끝(재 둔 값), 없으면 흰자 높이의 95%.
+    // flare 눈꺼풀 그림(얼굴 뒤)은 얼굴 눈 구멍 높이만큼 같은 박자로 내려와 구멍을 덮는다.
+    const H=rig.faceGeometry?.lidDrop?.[side],measured=rig.faceGeometry?.lashDrop?.[side];
+    // 속눈썹은 face-rig가 잰 거리(위 속눈썹 아래끝 → 얼굴 눈 구멍 아래끝, 눈꺼풀 높이의 30~90%)만큼. 없으면 흰자 높이의 95%
+    const drop=measured??(H?H*.6:h*.95),cover=`face_lid_cover_${side}`,coverK=(H??drop)/drop;
     out.face_gaze.spec[pupil]={translate:p=>move(pupil,sin(p)*w*.07*A,sin(p*2)*h*.08*A)};
     out.face_turn.spec[pupil]={translate:p=>move(pupil,sin(p+.04)*w*.08*A,0)};
     out.idle_face.spec[pupil]={translate:p=>move(pupil,look(p)*w*.08*A,0)};
     for(const vertical of ['upper','lower']){
       const id=`face_lid_${vertical}_${side}`;
       out.face_gaze.spec[id]={translate:p=>move(id,sin(p)*w*.07*A*.45,sin(p*2)*h*.08*A*.55)};
-      out.face_expression.spec[id]={translate:p=>move(id,0,vertical==='upper'?Math.max(pulse(p)*h*.16*A,blink(p,.5)*h*.95):-pulse(p)*h*.08*A)};
-      out.idle_face.spec[id]={translate:p=>move(id,look(p)*w*.08*A*.45,Math.max(blink(p,.3),blink(p,.82))*h*(vertical==='upper'?.95:-.1))};
+      out.face_expression.spec[id]={translate:p=>move(id,0,vertical==='upper'?Math.max(pulse(p)*h*.16*A,blink(p,.5)*drop):-pulse(p)*h*.08*A)};
+      out.idle_face.spec[id]={translate:p=>move(id,look(p)*w*.08*A*.45,Math.max(blink(p,.3),blink(p,.82))*(vertical==='upper'?drop:-h*.1))};
+    }
+    if(rig.activeBones?.includes(cover)){
+      out.face_gaze.spec[cover]={translate:p=>move(cover,sin(p)*w*.07*A*.45,sin(p*2)*h*.08*A*.55*coverK)};
+      out.face_expression.spec[cover]={translate:p=>move(cover,0,Math.max(pulse(p)*h*.16*A,blink(p,.5)*drop)*coverK)};
+      out.idle_face.spec[cover]={translate:p=>move(cover,look(p)*w*.08*A*.45,Math.max(blink(p,.3),blink(p,.82))*drop*coverK)};
     }
     out.face_expression.spec[brow]={translate:p=>move(brow,0,-sin(p)*fh*.012*A)};
     const direction=side==='left'?-1:1,lift=p=>pulse(p)*(side==='left'?(1+sin(p))/2:(1-sin(p))/2);

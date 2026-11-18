@@ -463,3 +463,177 @@ export async function redrawAll({ token, layers, signal, limit = 3, onProgress =
   await Promise.all(Array.from({ length: Math.min(limit, targets.length) }, worker));
   return { results, errors, total: targets.length };
 }
+
+// ── 눈꺼풀: flare가 "감은 눈"을 그리고, 그 피부를 얼굴 뒤 눈꺼풀 레이어로 쓴다 ──
+// 그림은 위가 평평하고(구멍 맨 위 줄) 아래는 열마다 구멍 아래끝까지: 높이 H = 구멍 전체 높이.
+// 평소에는 H만큼 위(얼굴 피부 뒤)에 숨어 있다가, 깜빡일 때 자기 뼈(face_lid_cover)가 H만큼 내려와 얼굴 눈 구멍을 덮는다.
+// 내려올 거리가 레이어 높이 그 자체라 리깅 쪽은 픽셀 없이 크기만으로 안다.
+export const EYELID_PROMPT = 'Close-up of an anime character\'s open eye. Paint the same eye closed: inside the masked area draw only the smooth upper eyelid skin '
+  + 'that covers the eye when it is closed, in the same skin tone with the same soft cel shading, and at most a thin, faint eyelid crease. '
+  + 'No eye white, iris, pupil, highlight or eyelashes inside the mask. Keep everything outside the mask unchanged.';
+
+/** 눈 뜬 자리(흰자·눈동자의 원화 픽셀을 열마다 위~아래로 메운 것)와 flare에 보낼 잘라 낸 영역. side = 'r' | 'l' */
+export function eyelidPlan(layers, side) {
+  const parts = layers.filter((l) => l.label === `eyewhite_${side}` || l.label === `irides_${side}`);
+  if (!parts.length) return null;
+  let W = 0, H = 0;
+  for (const l of layers) { W = Math.max(W, l.x + l.width); H = Math.max(H, l.y + l.height); }
+  const top = new Map(), bot = new Map();
+  const put = (gx, gy) => { if (!top.has(gx) || gy < top.get(gx)) top.set(gx, gy); if (!bot.has(gx) || gy > bot.get(gx)) bot.set(gx, gy); };
+  let ex0 = Infinity, ey0 = Infinity, ex1 = -1, ey1 = -1;
+  for (const l of parts) for (let y = 0; y < l.height; y++) for (let x = 0; x < l.width; x++) {
+    const j = y * l.width + x;
+    if (l.data[j * 4 + 3] <= 16 || l.fillMask?.[j]) continue;
+    const gx = l.x + x, gy = l.y + y; put(gx, gy);
+    ex0 = Math.min(ex0, gx); ey0 = Math.min(ey0, gy); ex1 = Math.max(ex1, gx); ey1 = Math.max(ey1, gy);
+  }
+  // 얼굴의 눈 구멍(얼굴이 다 불투명하지 않은 곳)도 눈 뜬 자리: 구멍 가장자리로 흰자 테두리가 비치지 않게
+  const face = layers.find((l) => l.label === 'face');
+  if (face && ex1 >= 0) for (let gy = ey0 - 3; gy <= ey1 + 3; gy++) for (let gx = ex0 - 3; gx <= ex1 + 3; gx++) {
+    const x = gx - face.x, y = gy - face.y; if (x < 0 || y < 0 || x >= face.width || y >= face.height) continue;
+    if (face.data[(y * face.width + x) * 4 + 3] < 200) put(gx, gy);
+  }
+  if (top.size < 4) return null;
+  const xs = [...top.keys()].sort((a, b) => a - b), x0 = xs[0], x1 = xs[xs.length - 1];
+  // 빈 열(속눈썹 끝 등)은 양옆 값을 잇는다
+  for (let x = x0; x <= x1; x++) if (!top.has(x)) { let k = 1; while (!top.has(x - k) && !top.has(x + k)) k++; const s = top.has(x - k) ? x - k : x + k; top.set(x, top.get(s)); bot.set(x, bot.get(s)); }
+  let minTop = Infinity, maxTop = -Infinity, maxBot = -Infinity;
+  for (let x = x0; x <= x1; x++) { minTop = Math.min(minTop, top.get(x)); maxTop = Math.max(maxTop, top.get(x)); maxBot = Math.max(maxBot, bot.get(x)); }
+  const S = maxBot - minTop + 1, bw = x1 - x0 + 1, m = Math.round(Math.max(bw, S) * 0.8);
+  const crop = { x: Math.max(0, x0 - m), y: Math.max(0, minTop - m) };
+  crop.w = Math.min(W, x1 + 1 + m) - crop.x; crop.h = Math.min(H, maxBot + 1 + m) - crop.y;
+  return { side, x0, x1, top, bot, minTop, maxTop, S, crop, W, H };
+}
+
+/** 앞→뒤 레이어를 잘라 낸 영역에 합성(흰 바탕) */
+export function compositeCrop(layers, crop) {
+  const out = new Uint8ClampedArray(crop.w * crop.h * 4).fill(255);
+  for (const l of [...layers].reverse()) for (let y = 0; y < l.height; y++) for (let x = 0; x < l.width; x++) {
+    const cx = l.x + x - crop.x, cy = l.y + y - crop.y; if (cx < 0 || cy < 0 || cx >= crop.w || cy >= crop.h) continue;
+    const s = (y * l.width + x) * 4, a = l.data[s + 3] / 255; if (!a) continue;
+    const d = (cy * crop.w + cx) * 4; for (let k = 0; k < 3; k++) out[d + k] = l.data[s + k] * a + out[d + k] * (1 - a);
+  }
+  return out;
+}
+
+/**
+ * flare 결과(잘라 낸 영역 크기 RGBA)로 눈꺼풀 레이어를 만든다. 감은 자리 색이 피부와 너무 다르거나 흰 픽셀이 많으면(눈을 그대로 그림) null.
+ * skin = 얼굴 피부색 [r,g,b]
+ */
+export function buildEyelid(plan, result, skin) {
+  const { x0, x1, top, bot, minTop, S, crop } = plan, width = x1 - x0 + 1, height = S;
+  const at = (gx, gy) => { const cx = Math.min(crop.w - 1, Math.max(0, gx - crop.x)), cy = Math.min(crop.h - 1, Math.max(0, gy - crop.y)); return result.subarray((cy * crop.w + cx) * 4, (cy * crop.w + cx) * 4 + 3); };
+  let n = 0, far = 0, white = 0;
+  for (let x = x0; x <= x1; x++) for (let y = top.get(x); y <= bot.get(x); y++) {
+    const c = at(x, y); n++;
+    if (Math.hypot(c[0] - skin[0], c[1] - skin[1], c[2] - skin[2]) > 70) far++;
+    if (c[0] > 235 && c[1] > 235 && c[2] > 235) white++;
+  }
+  // 감은 눈 선·주름은 피부와 다르므로 35%까지 허용(흰 픽셀이 10%를 넘으면 눈을 그대로 그린 것)
+  if (!n || far / n > 0.35 || white / n > 0.1) return null;
+  const data = new Uint8ClampedArray(width * height * 4), fillMask = new Uint8Array(width * height).fill(1);
+  for (let x = x0; x <= x1; x++) {
+    const b = bot.get(x);
+    for (let gy = minTop; gy <= b; gy++) {
+      const c = at(x, gy), d = ((gy - minTop) * width + (x - x0)) * 4;
+      data[d] = c[0]; data[d + 1] = c[1]; data[d + 2] = c[2]; data[d + 3] = 255;
+    }
+  }
+  // 평소 자리: 높이만큼 위(얼굴 피부 뒤)
+  return { label: `eyelid_${plan.side}`, x: x0, y: minTop - S, width, height, data, fillMask, lidDrop: S };
+}
+
+/**
+ * 얼굴 눈 구멍 둘레 2px의 밝은 테두리(원화의 피부↔흰자 섞인 색)를 피부색 쪽으로 70% 당기고 불투명하게 한다.
+ * 그대로 두면 눈을 감았을 때 눈꺼풀 둘레에 흰 고리가 남는다.
+ */
+export function tidyFaceRim(face, plan, skin) {
+  if (!face?.data) return 0;
+  const inOpen = (gx, gy) => gx >= plan.x0 && gx <= plan.x1 && gy >= plan.top.get(gx) && gy <= plan.bot.get(gx);
+  const skinLum = 0.299 * skin[0] + 0.587 * skin[1] + 0.114 * skin[2];
+  let n = 0;
+  for (let gy = plan.minTop - 3; gy <= plan.minTop + plan.S + 2; gy++) for (let gx = plan.x0 - 3; gx <= plan.x1 + 3; gx++) {
+    const x = gx - face.x, y = gy - face.y; if (x < 0 || y < 0 || x >= face.width || y >= face.height || inOpen(gx, gy)) continue;
+    const i = (y * face.width + x) * 4; if (face.data[i + 3] < 200) continue;
+    let near = false;
+    for (let dy = -2; dy <= 2 && !near; dy++) for (let dx = -2; dx <= 2 && !near; dx++) if (inOpen(gx + dx, gy + dy)) near = true;
+    if (!near) continue;
+    const lum = 0.299 * face.data[i] + 0.587 * face.data[i + 1] + 0.114 * face.data[i + 2];
+    if (lum > skinLum + 10) { for (let k = 0; k < 3; k++) face.data[i + k] = face.data[i + k] * 0.3 + skin[k] * 0.7; n++; }
+    face.data[i + 3] = 255;
+  }
+  return n;
+}
+
+/**
+ * 위 속눈썹 밑의 얼굴 픽셀을 flare의 감은 눈 그림(같은 자리)으로 칠한다. 깜빡일 때 속눈썹이 내려가면 이 자리가 드러나는데,
+ * 원화에는 속눈썹 테두리 섞인 색·흰 점이 남아 있어 지저분하다. 평소에는 속눈썹이 덮고 있어 거의 그대로다.
+ */
+export function paintUnderLash(face, lash, plan, result) {
+  if (!face?.data || !lash?.data) return 0;
+  const { crop } = plan; let n = 0;
+  for (let y = 0; y < lash.height; y++) for (let x = 0; x < lash.width; x++) {
+    if (lash.data[(y * lash.width + x) * 4 + 3] < 8) continue;
+    const gx = lash.x + x, gy = lash.y + y, fx = gx - face.x, fy = gy - face.y, cx = gx - crop.x, cy = gy - crop.y;
+    if (fx < 0 || fy < 0 || fx >= face.width || fy >= face.height || cx < 0 || cy < 0 || cx >= crop.w || cy >= crop.h) continue;
+    const i = (fy * face.width + fx) * 4, j = (cy * crop.w + cx) * 4;
+    if (face.data[i + 3] < 200) continue; // 눈 구멍은 그대로(눈꺼풀 그림이 덮는다)
+    face.data[i] = result[j]; face.data[i + 1] = result[j + 1]; face.data[i + 2] = result[j + 2]; face.data[i + 3] = 255; n++;
+  }
+  return n;
+}
+
+/** 속눈썹 레이어에 붙어 있던 알고리즘 피부 띠(채움 픽셀)를 걷어 낸다 */
+export function stripLashBand(layer) {
+  if (!layer?.fillMask) return 0;
+  let n = 0;
+  for (let i = 0; i < layer.fillMask.length; i++) if (layer.fillMask[i]) { layer.data[i * 4 + 3] = 0; layer.fillMask[i] = 0; n++; }
+  return n;
+}
+
+function skinOf(layers) {
+  const face = layers.find((l) => l.label === 'face'); if (!face) return [240, 205, 185];
+  let r = 0, g = 0, b = 0, n = 0;
+  for (let i = 0; i < face.width * face.height; i++) if (face.data[i * 4 + 3] > 250 && !face.fillMask?.[i]) { r += face.data[i * 4]; g += face.data[i * 4 + 1]; b += face.data[i * 4 + 2]; n++; }
+  if (!n) return [240, 205, 185];
+  // 피부 주색: 평균 근처 픽셀만 다시 평균(선·그림자 제외)
+  const m = [r / n, g / n, b / n]; r = g = b = n = 0;
+  for (let i = 0; i < face.width * face.height; i++) if (face.data[i * 4 + 3] > 250) { const c = face.data.subarray(i * 4, i * 4 + 3); if (Math.hypot(c[0] - m[0], c[1] - m[1], c[2] - m[2]) < 40) { r += c[0]; g += c[1]; b += c[2]; n++; } }
+  return n ? [r / n, g / n, b / n] : m;
+}
+
+/** 양쪽 눈꺼풀을 flare로 그려 레이어를 만든다. 얼굴 바로 뒤에 끼우고 속눈썹의 피부 띠는 걷어 낸다. */
+export async function drawEyelids({ token, layers, signal }) {
+  const made = [], errors = [], skin = skinOf(layers);
+  await Promise.all(['r', 'l'].map(async (side) => {
+    const plan = eyelidPlan(layers, side); if (!plan) return;
+    try {
+      const { crop } = plan, size = flareSize(crop.w, crop.h), t = fitTransform(crop.w, crop.h, size[0], size[1]);
+      const src = make(crop.w, crop.h); src.getContext('2d').putImageData(new ImageData(compositeCrop(layers, crop), crop.w, crop.h), 0, 0);
+      const scene = make(size[0], size[1]), sctx = scene.getContext('2d'); sctx.fillStyle = '#fff'; sctx.fillRect(0, 0, size[0], size[1]); sctx.drawImage(src, t.ox, t.oy, crop.w * t.s, crop.h * t.s);
+      const hole = make(crop.w, crop.h), hctx = hole.getContext('2d'), hd = hctx.createImageData(crop.w, crop.h);
+      for (let x = plan.x0 - 1; x <= plan.x1 + 1; x++) {
+        const cx = Math.min(plan.x1, Math.max(plan.x0, x));
+        for (let y = plan.top.get(cx) - 1; y <= plan.bot.get(cx) + 1; y++) { const px = x - crop.x, py = y - crop.y; if (px >= 0 && py >= 0 && px < crop.w && py < crop.h) hd.data[(py * crop.w + px) * 4 + 3] = 255; }
+      }
+      hctx.putImageData(hd, 0, 0);
+      const mask = make(size[0], size[1]), mctx = mask.getContext('2d'); mctx.fillStyle = '#000'; mctx.fillRect(0, 0, size[0], size[1]);
+      mctx.globalCompositeOperation = 'destination-out'; mctx.drawImage(hole, t.ox, t.oy, crop.w * t.s, crop.h * t.s);
+      const { canvas: out } = await callFlare({ token, image: await toBlob(scene), mask: await toBlob(mask), prompt: EYELID_PROMPT, size, signal });
+      const back = make(crop.w, crop.h), bctx = back.getContext('2d', { willReadFrequently: true }), sx = out.width / size[0], sy = out.height / size[1];
+      bctx.drawImage(out, t.ox * sx, t.oy * sy, crop.w * t.s * sx, crop.h * t.s * sy, 0, 0, crop.w, crop.h);
+      const lid = buildEyelid(plan, bctx.getImageData(0, 0, crop.w, crop.h).data, skin);
+      if (!lid) throw Error('감은 눈 자리가 피부가 아니라서 버렸어요');
+      made.push(lid); lid.plan = plan; lid.result = bctx.getImageData(0, 0, crop.w, crop.h).data;
+    } catch (e) { if (e.name === 'AbortError') throw e; errors.push(`eyelid_${side}: ${e.message}`); }
+  }));
+  for (const lid of made) {
+    const lash = layers.find((l) => l.label === `eyelash_${lid.label.slice(-1)}`), face = layers.find((l) => l.label === 'face');
+    stripLashBand(lash);
+    paintUnderLash(face, lash, lid.plan, lid.result);
+    tidyFaceRim(face, lid.plan, skin); delete lid.plan; delete lid.result;
+    const at = layers.findIndex((l) => l.label === 'face');
+    layers.splice(at >= 0 ? at + 1 : layers.length, 0, lid);
+  }
+  return { made: made.map((l) => l.label), errors };
+}
