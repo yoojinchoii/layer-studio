@@ -3,7 +3,7 @@
 // 결과 형식은 GPU 서버의 응답과 같아서 웹앱의 나머지(리깅·웨이트·모션·Spine 출력)를 그대로 쓴다.
 
 import { segment } from './segment-core.js';
-import { fitJoints } from './skeleton.js';
+import { fitJoints, applyAiJoints } from './skeleton.js';
 import { assignParts } from './parts.js';
 import { buildLayers } from './layers.js';
 import { applyAiLabels } from './ai-labels.js';
@@ -52,7 +52,9 @@ export function buildReport({ rig, parts, built, width, height, frame }) {
   for (const base of ['arm', 'sleeve', 'legwear', 'footwear']) {
     const r = area[`${base}_r`];
     const l = area[`${base}_l`];
-    if (r && l && (r / l > 2 || l / r > 2)) issues.push({ code: 'asymmetric', part: base, message: `${base} 좌우 크기가 두 배 넘게 다릅니다 (${r}px / ${l}px).` });
+    // flare가 관절을 찍어 준 팔·다리는 포즈(한 팔을 들거나 다리를 꼼)로 크기가 다를 수 있어 좌우 대칭을 따지지 않는다.
+    const posed = (rig.aiJoints || []).includes(base === 'legwear' || base === 'footwear' ? 'legs' : 'arm_left') && (base === 'legwear' || base === 'footwear' || (rig.aiJoints || []).includes('arm_right'));
+    if (r && l && !posed && (r / l > 2 || l / r > 2)) issues.push({ code: 'asymmetric', part: base, message: `${base} 좌우 크기가 두 배 넘게 다릅니다 (${r}px / ${l}px).` });
   }
   const materialsOk = !missingParts.length && !issues.some((i) => i.code === 'asymmetric');
 
@@ -108,7 +110,8 @@ export function runLocalEngine(rgba, width, height, params = {}) {
   const t = [performance.now()];
   const seg = segment(rgba, width, height, { ...params, aiLabels: undefined });
   t.push(performance.now());
-  const rig = fitJoints(seg.fg, width, height);
+  // flare 관절(있으면)이 골격 분석보다 우선: 팔을 굽히거나 다리를 꼰 포즈도 제자리에 잡는다.
+  const rig = applyAiJoints(fitJoints(seg.fg, width, height), params.aiJoints);
   t.push(performance.now());
   let parts = assignParts(seg, rig);
   // flare 부위 지도가 있으면 의미는 AI, 경계는 색 영역으로 다시 배정한다.

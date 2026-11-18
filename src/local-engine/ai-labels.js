@@ -111,6 +111,27 @@ export function applyAiLabels(seg, rig, partsResult, ai, { regionShare = 0.88 } 
     names[i] = name;
   }
 
+  // 손에 든 물건(AI 지도 '기타' 덩어리 중 손목·손끝 가까이 있는 것) → prop_r / prop_l: 손목 뼈를 따라 움직인다.
+  const P = rig.points || {}, ends = rig.ends || {};
+  const hands = ['left', 'right'].flatMap((side) => [P[`wrist_${side}`], ends[`hand_tip_${side}`]].filter(Boolean).map((p) => ({ side, p })));
+  if (hands.length) {
+    const other = new Uint8Array(n);
+    for (let i = 0; i < n; i++) if (fg[i] && keyOf(regionClass[labels[i]] || ai[i]) === 'other') other[i] = 1;
+    const seen = new Uint8Array(n), reach = Math.max(12, h * 0.06);
+    for (let i0 = 0; i0 < n; i0++) {
+      if (!other[i0] || seen[i0]) continue;
+      const comp = [i0]; seen[i0] = 1;
+      for (let q = 0; q < comp.length; q++) { const i = comp[q], x = i % w, y = (i - x) / w;
+        for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) if (j >= 0 && other[j] && !seen[j]) { seen[j] = 1; comp.push(j); } }
+      if (comp.length < 30) continue;
+      // 덩어리에서 손까지 가장 가까운 거리
+      let best = null;
+      for (const hnd of hands) { let d = Infinity; for (let k = 0; k < comp.length; k += 3) { const x = comp[k] % w, y = (comp[k] - x) / w; d = Math.min(d, Math.hypot(x - hnd.p.x, y - hnd.p.y)); } if (!best || d < best.d) best = { d, side: hnd.side }; }
+      if (!best || best.d > reach) continue;
+      const name = `prop_${best.side === 'left' ? 'r' : 'l'}`;
+      for (const i of comp) { if (names[i] !== name) changed++; names[i] = name; }
+    }
+  }
   const order = Object.keys(PART_LABELS);
   const used = [...new Set(names.filter(Boolean))].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));
   const idOf = new Map(used.map((name, k) => [name, k + 1]));

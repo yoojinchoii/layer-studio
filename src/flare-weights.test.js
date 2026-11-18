@@ -3,8 +3,9 @@ import assert from 'node:assert/strict';
 import { weightDistance, refinementPoints } from './weight-refine.js';
 import { normalizeBound } from './rig-core.js';
 import { AI_CLASSES, classifyMap, segmentationPrompt, applyAiLabels } from './local-engine/ai-labels.js';
-import { flareSize, fitTransform, validToken, redrawTargets, completionPlan, mergeCompletion, completionPrompt, backgroundFor, trimLimbRoot, eyelidPlan, buildEyelid, stripLashBand, tidyFaceRim, paintUnderLash } from './flare-client.js';
+import { flareSize, fitTransform, validToken, redrawTargets, completionPlan, mergeCompletion, completionPrompt, backgroundFor, trimLimbRoot, eyelidPlan, buildEyelid, stripLashBand, tidyFaceRim, paintUnderLash, detectKeypoints, KEYPOINT_COLORS, keypointPrompt } from './flare-client.js';
 import { facePartKind } from './face-rig.js';
+import { applyAiJoints } from './local-engine/skeleton.js';
 
 test('weight distance is 0 for equal weights and 1 for disjoint bones', () => {
   assert.equal(weightDistance(new Map([['a', 1]]), new Map([['a', 1]])), 0);
@@ -201,4 +202,27 @@ test('face pixels under the upper lash take the closed-eye drawing, the eye hole
   assert.ok(paintUnderLash(face, lash, plan, result) > 23);
   assert.equal(face.data[(9 * 20 + 3) * 4], 200); // 속눈썹 둘레의 다른 색도 감은 눈 그림으로
   assert.equal(face.data[(10 * 20 + 3) * 4], 200); assert.equal(face.data[(12 * 20 + 5) * 4 + 3], 0); assert.equal(face.data[(5 * 20 + 3) * 4], 240);
+});
+
+test('flare keypoint dots are read by color, gray stick lines and white are ignored', () => {
+  const w = 60, h = 40, d = new Uint8ClampedArray(w * h * 4).fill(255);
+  const dot = (cx, cy, c, r = 2) => { for (let y = cy - r; y <= cy + r; y++) for (let x = cx - r; x <= cx + r; x++) d.set([...c, 255], (y * w + x) * 4); };
+  for (let x = 0; x < w; x++) d.set([180, 180, 180, 255], (20 * w + x) * 4); // 회색 막대
+  dot(10, 10, KEYPOINT_COLORS.shoulder_left); dot(40, 30, KEYPOINT_COLORS.knee_right); dot(30, 5, [10, 10, 10], 1); // 너무 작은 검은 점
+  dot(50, 10, [240, 20, 20], 1); // 작은 빨간 점(가장 큰 덩어리가 아님)
+  const k = detectKeypoints(d, w, h, { minPixels: 6 });
+  assert.deepEqual(k.shoulder_left, { x: 10, y: 10 }); assert.deepEqual(k.knee_right, { x: 40, y: 30 });
+  assert.equal(k.neck, undefined); assert.match(keypointPrompt(), /LEFT side of the picture/);
+});
+
+test('flare joints replace bent-arm and crossed-leg guesses and clear their warnings', () => {
+  const rig = { frame: 'full', method: 'partial', missing: ['arm_left', 'legs'], points: { neck: { x: 50, y: 20 }, head: { x: 50, y: 10 }, arm_left: { x: 0, y: 0 }, elbow_left: { x: 0, y: 0 }, wrist_left: { x: 0, y: 0 } },
+    ends: {}, warnings: ['화면 왼쪽 팔을 골격에서 찾지 못해 비율로 채웠습니다', '다리 갈림 높이(77%)가 이상해', '머리 옆 끝점'], checks: [{ id: 'x', ok: false }] };
+  const ai = { neck: { x: 50, y: 22 }, shoulder_left: { x: 40, y: 25 }, elbow_left: { x: 35, y: 40 }, wrist_left: { x: 36, y: 55 },
+    hip_left: { x: 45, y: 60 }, knee_left: { x: 47, y: 80 }, ankle_left: { x: 44, y: 98 }, hip_right: { x: 55, y: 60 }, knee_right: { x: 50, y: 80 }, ankle_right: { x: 56, y: 98 } };
+  const r = applyAiJoints(rig, ai);
+  assert.equal(r.method, 'skeleton'); assert.deepEqual(r.missing, []);
+  assert.deepEqual(r.points.elbow_left, { x: 35, y: 40 }); assert.deepEqual(r.points.knee_right, { x: 50, y: 80 });
+  assert.ok(r.points.body.y > r.points.chest.y && r.points.body.y < 60);
+  assert.deepEqual(r.warnings, ['머리 옆 끝점']); assert.ok(r.ends.hand_tip_left.y > 55);
 });

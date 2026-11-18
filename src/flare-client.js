@@ -107,6 +107,64 @@ export async function requestPartMap({ token, source, signal }) {
   return { labels: classifyMap(bctx.getImageData(0, 0, w, h).data, w * h), preview: back };
 }
 
+// ── 관절: flare가 흰 바탕에 관절마다 정해진 색 점을 찍고, 점의 위치를 읽는다 ──
+// 좌우는 화면 기준(어깨·엉덩이가 그림 왼쪽에 있는 팔·다리 = _left). 리그 관절 이름도 화면 기준이다.
+export const KEYPOINT_COLORS = {
+  neck: [255, 255, 0],
+  shoulder_left: [255, 0, 0], elbow_left: [255, 136, 0], wrist_left: [255, 0, 255],
+  shoulder_right: [0, 0, 255], elbow_right: [0, 255, 255], wrist_right: [136, 0, 255],
+  hip_left: [0, 255, 0], knee_left: [0, 102, 0], ankle_left: [136, 68, 0],
+  hip_right: [255, 136, 204], knee_right: [0, 0, 136], ankle_right: [0, 136, 136],
+};
+export function keypointPrompt() {
+  const hex = (c) => '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase(), K = KEYPOINT_COLORS;
+  return 'Pose keypoint chart. Keep exactly the same canvas, framing and scale. Replace the whole illustration with a plain white background and draw only a thin light-gray stick figure '
+    + 'where the character\'s skeleton is, with a filled circle (about 14 px wide, flat pure color, no outline, no shading) on each joint at its exact position in the original picture:\n'
+    + `- base of the neck (between the collarbones): yellow ${hex(K.neck)}\n`
+    + `- the arm whose shoulder is on the LEFT side of the picture: shoulder red ${hex(K.shoulder_left)}, elbow orange ${hex(K.elbow_left)}, wrist magenta ${hex(K.wrist_left)}\n`
+    + `- the arm whose shoulder is on the RIGHT side of the picture: shoulder blue ${hex(K.shoulder_right)}, elbow cyan ${hex(K.elbow_right)}, wrist purple ${hex(K.wrist_right)}\n`
+    + `- the leg whose hip is on the LEFT side of the picture: hip green ${hex(K.hip_left)}, knee dark green ${hex(K.knee_left)}, ankle brown ${hex(K.ankle_left)}\n`
+    + `- the leg whose hip is on the RIGHT side of the picture: hip pink ${hex(K.hip_right)}, knee navy ${hex(K.knee_right)}, ankle teal ${hex(K.ankle_right)}\n`
+    + 'The wrist is where the hand meets the forearm, not on the fingers. Place joints where they really are even if hidden under clothing, hair or a skirt (estimate from the body). '
+    + 'Skip a limb entirely if it is not in the picture. Do not draw the character, clothes, hair, text or any other marks.';
+}
+/** 키포인트 그림(RGBA, w×h)에서 색마다 가장 큰 점 덩어리의 가운데. 없거나 너무 작으면 빠진다. */
+export function detectKeypoints(data, w, h, { tolerance = 110, minPixels = 6 } = {}) {
+  const out = {}, entries = Object.entries(KEYPOINT_COLORS), label = new Int8Array(w * h).fill(-1);
+  for (let i = 0; i < w * h; i++) {
+    const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+    if (Math.max(r, g, b) - Math.min(r, g, b) < 40 && !(r < 60 && g < 60 && b < 60)) continue; // 흰 바탕·회색 막대
+    let best = -1, bd = tolerance;
+    entries.forEach(([, c], k) => { const d = Math.hypot(r - c[0], g - c[1], b - c[2]); if (d < bd) { bd = d; best = k; } });
+    label[i] = best;
+  }
+  const seen = new Uint8Array(w * h);
+  entries.forEach(([name], k) => {
+    let bestN = 0, bx = 0, by = 0;
+    for (let i = 0; i < w * h; i++) {
+      if (label[i] !== k || seen[i]) continue;
+      const q = [i]; seen[i] = 1; let n = 0, sx = 0, sy = 0;
+      while (q.length) { const p = q.pop(), x = p % w, y = (p - x) / w; n++; sx += x; sy += y;
+        for (const j of [x > 0 ? p - 1 : -1, x < w - 1 ? p + 1 : -1, y > 0 ? p - w : -1, y < h - 1 ? p + w : -1]) if (j >= 0 && !seen[j] && label[j] === k) { seen[j] = 1; q.push(j); } }
+      if (n > bestN) { bestN = n; bx = sx / n; by = sy / n; }
+    }
+    if (bestN >= minPixels) out[name] = { x: bx, y: by };
+  });
+  return out;
+}
+/** 원화(작업 해상도 canvas)의 관절 위치를 flare로 찾는다. 작업 해상도 픽셀 좌표. */
+export async function requestKeypoints({ token, source, signal }) {
+  const w = source.width, h = source.height, size = flareSize(w, h), t = fitTransform(w, h, size[0], size[1]);
+  const input = make(size[0], size[1]), ctx = input.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, size[0], size[1]); ctx.drawImage(source, t.ox, t.oy, w * t.s, h * t.s);
+  const { canvas: map } = await callFlare({ token, image: await toBlob(input), prompt: keypointPrompt(), size, signal });
+  const back = make(w, h), bctx = back.getContext('2d', { willReadFrequently: true });
+  bctx.imageSmoothingEnabled = false;
+  const sx = map.width / size[0], sy = map.height / size[1];
+  bctx.drawImage(map, t.ox * sx, t.oy * sy, w * t.s * sx, h * t.s * sy, 0, 0, w, h);
+  return detectKeypoints(bctx.getImageData(0, 0, w, h).data, w, h, { minPixels: Math.max(4, Math.round((w * h) / 200000)) });
+}
+
 const PART_TEXT = {
   front_hair: 'hair', back_hair: 'back part of the hair seen behind the head', face: 'face skin', neck: 'neck', topwear: 'upper-body clothing (shirt or top)',
   sleeve_r: 'sleeve', sleeve_l: 'sleeve', arm_r: 'arm and hand', arm_l: 'arm and hand', handwear: 'arms and hands',

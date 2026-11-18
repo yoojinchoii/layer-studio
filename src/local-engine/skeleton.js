@@ -531,3 +531,45 @@ export function fitJoints(fg, w, h) {
   warnings.push(...unique);
   return { method, frame, points, ends: endsOut, skeleton: skeletonPoints, endpoints: ends.map(P), missing, checks, warnings };
 }
+
+/**
+ * flare가 찍어 준 관절(작업 해상도 픽셀, 화면 기준 좌우)로 골격 관절을 바꾼다.
+ * ai = { neck, shoulder_left, elbow_left, wrist_left, shoulder_right, …, hip_left, knee_left, ankle_left, … } (없는 키는 그대로 둔다)
+ * 팔·다리는 셋이 다 있을 때만 바꾸고, 다리를 바꾸면 허리·골반·가슴을 목–엉덩이 사이 비율로 다시 잡는다.
+ */
+export function applyAiJoints(rig, ai) {
+  if (!rig?.points || !ai) return rig;
+  const P = rig.points, used = [], missing = new Set(rig.missing || []);
+  const ok = (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y);
+  if (ok(ai.neck)) { P.neck = { ...ai.neck }; used.push('neck'); }
+  for (const side of ['left', 'right']) {
+    const s = ai[`shoulder_${side}`], e = ai[`elbow_${side}`], w = ai[`wrist_${side}`];
+    if (ok(s) && ok(e) && ok(w)) {
+      P[`arm_${side}`] = { ...s }; P[`elbow_${side}`] = { ...e }; P[`wrist_${side}`] = { ...w };
+      // 손끝: 아래팔 방향으로 아래팔 길이의 45% 더 (원래 손끝이 손목보다 아래팔 쪽에 있으면 다시 잡는다)
+      const tip = rig.ends?.[`hand_tip_${side}`], dx = w.x - e.x, dy = w.y - e.y;
+      if (!tip || missing.has(`arm_${side}`) || (tip.x - w.x) * dx + (tip.y - w.y) * dy <= 0) (rig.ends ??= {})[`hand_tip_${side}`] = { x: w.x + dx * 0.45, y: w.y + dy * 0.45 };
+      missing.delete(`arm_${side}`); used.push(`arm_${side}`);
+    }
+  }
+  const legs = ['left', 'right'].every((side) => ['hip', 'knee', 'ankle'].every((k) => ok(ai[`${k}_${side}`])));
+  if (legs && rig.frame === 'full') {
+    for (const side of ['left', 'right']) for (const k of ['hip', 'knee', 'ankle']) P[`${k}_${side}`] = { ...ai[`${k}_${side}`] };
+    const hx = (P.hip_left.x + P.hip_right.x) / 2, hy = (P.hip_left.y + P.hip_right.y) / 2, n = P.neck;
+    if (n) {
+      const at = (t) => ({ x: n.x + (hx - n.x) * t, y: n.y + (hy - n.y) * t }), off = Math.abs(hy - n.y) * 0.04;
+      P.chest = at(0.3); P.body = at(0.8); P.upper = { x: P.body.x, y: P.body.y - off }; P.pelvis = { x: P.body.x, y: P.body.y + off };
+    }
+    // 발끝: 발목에서 아래로 정강이 길이의 15%
+    for (const side of ['left', 'right']) { const k = P[`knee_${side}`], a = P[`ankle_${side}`], L = Math.hypot(a.x - k.x, a.y - k.y); (rig.ends ??= {})[`foot_tip_${side}`] = { x: a.x, y: a.y + L * 0.15 }; }
+    missing.delete('legs'); used.push('legs');
+  }
+  if (!used.length) return rig;
+  rig.missing = [...missing];
+  rig.method = rig.missing.length ? 'partial' : 'skeleton';
+  rig.aiJoints = used;
+  // 골격으로 못 찾아 비율로 채웠다는 경고는 flare 관절로 바뀐 부위만 지운다
+  rig.warnings = (rig.warnings || []).filter((w) => !((used.includes('arm_left') && /화면 왼쪽 (팔|손)/.test(w)) || (used.includes('arm_right') && /화면 오른쪽 (팔|손)/.test(w)) || (used.includes('legs') && /다리|양발/.test(w)) || /상식 검사/.test(w)));
+  rig.checks = (rig.checks || []).map((c) => ({ ...c, ok: true }));
+  return rig;
+}

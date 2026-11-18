@@ -77,7 +77,7 @@ export function inferRig(layers,width,height){
   const assignments=layers.map(l=>{const n=l.name.toLowerCase(),part=n.match(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_([rl])(?:_\d+)?$/);
     if(part)return `${partBones[part[1]]}_${part[2]==='r'?'left':'right'}`;
     const lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'hip':'ankle'}_${lower[2]==='r'?'left':'right'}`;
-    if(isHeadAccessory(n))return 'head';if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'arm_left':'arm_right';if(/topwear|상의/.test(n))return 'chest';if(isArmPart(n))return `arm_${namedSide(n)||(center(l)<cx?'left':'right')}`;if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
+    if(/^prop_[rl]$/.test(n))return n.endsWith('_r')?'wrist_left':'wrist_right';if(isHeadAccessory(n))return 'head';if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'arm_left':'arm_right';if(/topwear|상의/.test(n))return 'chest';if(isArmPart(n))return `arm_${namedSide(n)||(center(l)<cx?'left':'right')}`;if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
   const modes=layers.map((l,i)=>{const n=l.name.toLowerCase(),lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'leg':'foot'}_${lower[2]==='r'?'left':'right'}`;if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'sleeve_left':'sleeve_right';if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';if(/bottomwear|하의|skirt|치마/.test(n))return 'bottoms';if(/topwear|상의/.test(n)&&assignments[i]==='chest')return 'torso';if(/^(neck|목)$/.test(n))return 'neck';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
   layers.forEach((l,i)=>{const roots=mergedArmRoots(l,layers);if(!roots)return;assignments[i]='chest';modes[i]='crossed_arms';points.arm_left=roots.left;points.arm_right=roots.right;});
   const rig={points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,garments:2,limbStyle:'mesh',weightBlend:{},partBones:{},meshDensity:'balanced',ik:true};restoreArmChains(rig,layers,{refit:true});return rig;
@@ -323,6 +323,9 @@ function rawBoneCandidates(rig,index,mode=rig.modes[index],bone=rig.assignments[
 }
 function weightGuide(layer,rig,mode,bone,x,y){
   if(mode==='face'||mode==='rigid')return {names:[bone],joints:[]};
+  // 팔을 조각으로 쓰는 방식(사용자 예시처럼)에서는 소매도 위팔과 한 조각으로 돈다: 몸통에 반쯤 붙어 있으면 팔을 높이 들 때
+  // 겨드랑이 쪽이 남아 늘어진다. 소매 밑 상의 어깨는 flare가 완성해 두었다.
+  if(mode.startsWith('sleeve_')&&rig.limbStyle==='arms'&&rig.points[`arm_${mode.slice(7)}`])return {names:[`arm_${mode.slice(7)}`],joints:[]};
   if(mode==='torso'||mode==='neck')return spineGuide(layer,rig,mode);
   const names=meshChain(rig,mode,x,y),points=names.map(id=>rig.points[id]),joints=[];
   for(let i=1;i<names.length;i++){
@@ -342,7 +345,8 @@ function weightGuide(layer,rig,mode,bone,x,y){
     // The whole waist is wider than one trouser leg, so a garment hip uses a thigh-length band instead.
     const band=clamp((garmentHip?len*.18:thickness===null?Math.min(len,after)*.12:Math.max(2,thickness)*1.25)*blend,1,maxBand);
     // Shoulder / hip: most of the blend sits on the torso side, so the limb itself still rotates fully.
-    joints.push({id:names[i],p,dir,band,shift:limbRoot?-band*.5:0});
+    // 소매는 팔을 높이 들어도 같이 올라가야 한다(반쯤만 따라오면 겨드랑이 밑으로 처진다): 섞는 띠를 몸통 쪽으로 더 민다.
+    joints.push({id:names[i],p,dir,band,shift:mode.startsWith('sleeve_')?-band*2:limbRoot?-band*.5:0});
   }
   const requested=layer.allowedBones||rig.partBones?.[layer.source],allowed=Array.isArray(requested)?names.filter(n=>requested.includes(n)):names;
   return {names,joints,allowed:allowed.length?allowed:names,points};
@@ -476,11 +480,19 @@ function templateAnimations(rig,ikNames,amplitude){
   const idleSpec={chest:{rotate:p=>sin(p,2)*.3*A,scale:p=>[1,1+(1-Math.cos(p*4*Math.PI))*.006*A]},head:{rotate:p=>-sin(p,2,-.08)*.65*A},hair:{rotate:p=>sin(p,2,-.15)*A},
     ...each((side,o)=>({[`arm_${side}`]:{rotate:p=>-o*sin(p,2)*.75*A},[`elbow_${side}`]:{rotate:p=>-o*sin(p,2,-.1)*1.2*A}}))};
   out.idle=make(8,idleSpec);
+  // 팔 목표 자세: 화면 오른쪽 팔 기준 월드 각도(위쪽이 +, 0° = 화면 오른쪽). 원화 팔 자세가 어떻든(A포즈·물건 든 팔) 같은 모양이 되게
+  // 쉬는 자세에서 목표까지의 회전량을 구한다. 화면 왼쪽 팔은 좌우 대칭(180° - 각도).
+  const restWorld=setupPose(rig).world,wrap=a=>((a+540)%360)-180;
+  const reach=(side,upper,fore)=>{const o=side==='right'?1:-1,mirror=a=>side==='right'?a:180-a,arm=restWorld[`arm_${side}`],el=restWorld[`elbow_${side}`];
+    if(!arm||!el)return {arm:o*upper,elbow:0};const a=wrap(mirror(upper)-arm.angle);return {arm:a,elbow:wrap(mirror(fore)-el.angle-a)};};
+  const waveArm=reach('right',15,85);
   // Template motions stay small: a starting point the animator exaggerates, not a finished take.
   out.wave=make(1.6,{chest:{rotate:p=>sin(p)*.8},head:{rotate:p=>sin(p,1,.25)*1.5},hair:{rotate:p=>-sin(p,1,.1)*1.2},
-    arm_right:{rotate:p=>40+sin(p)*3},elbow_right:{rotate:p=>25+sin(p,2)*12},wrist_right:{rotate:p=>sin(p,2,-.12)*6},arm_left:{rotate:p=>sin(p)*1}});
+    // 손 흔들기: 위팔을 어깨 높이 위로(75°), 아래팔은 위로 세우고(팔꿈치 70°) 팔꿈치에서 좌우로 두 번 흔든다. 손목은 반 박자 늦게.
+    arm_right:{rotate:p=>(waveArm.arm+sin(p)*3)*A},elbow_right:{rotate:p=>(waveArm.elbow+sin(p,2)*22)*A},wrist_right:{rotate:p=>sin(p,2,-.12)*12*A},arm_left:{rotate:p=>sin(p)*1}});
   energy=1.3;out.cheer=make(1.2,{body:{translate:p=>[0,(1-Math.cos(p*4*Math.PI))*1.5*s]},head:{rotate:p=>sin(p)*2},hair:{rotate:p=>-sin(p,2,.1)*1.5},
-    ...each((side,o)=>({[`arm_${side}`]:{rotate:p=>o*(30+sin(p,2)*5)},[`elbow_${side}`]:{rotate:p=>o*(10+sin(p,2,.08)*5)}}))});
+    // 환호: 두 팔을 머리 위로(위팔 100°) 들고 박자에 맞춰 조금씩 흔든다
+    ...each((side,o)=>{const r=reach(side,40,55);return {[`arm_${side}`]:{rotate:p=>(r.arm+o*sin(p,2)*8)*A},[`elbow_${side}`]:{rotate:p=>(r.elbow+o*sin(p,2,.08)*8)*A}};})});
   // Hop: crouch → jump → land. The body dip matches how much the bent legs shorten, so feet stay on the ground.
   const crouch=p=>p<.2?Math.sin(Math.PI*p/.2):p>=.75?Math.sin(Math.PI*(p-.75)/.25)*.7:0,air=p=>p>=.2&&p<.75?Math.sin(Math.PI*(p-.2)/.55):0,theta=9;
   const leg=side=>P[`hip_${side}`]&&P[`knee_${side}`]&&P[`ankle_${side}`]?Math.hypot(P[`knee_${side}`].x-P[`hip_${side}`].x,P[`knee_${side}`].y-P[`hip_${side}`].y)+Math.hypot(P[`ankle_${side}`].x-P[`knee_${side}`].x,P[`ankle_${side}`].y-P[`knee_${side}`].y):0;

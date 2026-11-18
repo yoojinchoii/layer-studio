@@ -20,7 +20,7 @@ export const PART_LABELS = {
   handwear: '양팔 (팔짱 · 가슴 고정)',
   hair: '머리카락', face: '얼굴', neck: '목', topwear: '상의',
   sleeve_r: '소매 R (화면 왼쪽)', sleeve_l: '소매 L (화면 오른쪽)',
-  arm_r: '팔 R (화면 왼쪽)', arm_l: '팔 L (화면 오른쪽)', bottomwear: '하의',
+  arm_r: '팔 R (화면 왼쪽)', arm_l: '팔 L (화면 오른쪽)', prop_r: '든 물건 R (화면 왼쪽 손)', prop_l: '든 물건 L (화면 오른쪽 손)', bottomwear: '하의',
   legwear_r: '다리 R (화면 왼쪽)', legwear_l: '다리 L (화면 오른쪽)',
   footwear_r: '신발 R (화면 왼쪽)', footwear_l: '신발 L (화면 오른쪽)',
 };
