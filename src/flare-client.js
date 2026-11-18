@@ -569,15 +569,23 @@ export function tidyFaceRim(face, plan, skin) {
  * 위 속눈썹 밑의 얼굴 픽셀을 flare의 감은 눈 그림(같은 자리)으로 칠한다. 깜빡일 때 속눈썹이 내려가면 이 자리가 드러나는데,
  * 원화에는 속눈썹 테두리 섞인 색·흰 점이 남아 있어 지저분하다. 평소에는 속눈썹이 덮고 있어 거의 그대로다.
  */
-export function paintUnderLash(face, lash, plan, result) {
+export function paintUnderLash(face, lash, plan, result, ring = 2) {
   if (!face?.data || !lash?.data) return 0;
   const { crop } = plan; let n = 0;
-  for (let y = 0; y < lash.height; y++) for (let x = 0; x < lash.width; x++) {
-    if (lash.data[(y * lash.width + x) * 4 + 3] < 8) continue;
-    const gx = lash.x + x, gy = lash.y + y, fx = gx - face.x, fy = gy - face.y, cx = gx - crop.x, cy = gy - crop.y;
+  const on = (gx, gy) => { const x = gx - lash.x, y = gy - lash.y; return x >= 0 && y >= 0 && x < lash.width && y < lash.height && lash.data[(y * lash.width + x) * 4 + 3] >= 8; };
+  const lum = (d, i) => 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+  for (let gy = lash.y - ring; gy < lash.y + lash.height + ring; gy++) for (let gx = lash.x - ring; gx < lash.x + lash.width + ring; gx++) {
+    const fx = gx - face.x, fy = gy - face.y, cx = gx - crop.x, cy = gy - crop.y;
     if (fx < 0 || fy < 0 || fx >= face.width || fy >= face.height || cx < 0 || cy < 0 || cx >= crop.w || cy >= crop.h) continue;
     const i = (fy * face.width + fx) * 4, j = (cy * crop.w + cx) * 4;
     if (face.data[i + 3] < 200) continue; // 눈 구멍은 그대로(눈꺼풀 그림이 덮는다)
+    const under = on(gx, gy);
+    if (!under) {
+      // 속눈썹 둘레 ring px: 속눈썹 테두리 섞인 색(감은 눈 그림과 밝기가 12 넘게 다른 픽셀)만
+      let near = false;
+      for (let dy = -ring; dy <= ring && !near; dy++) for (let dx = -ring; dx <= ring && !near; dx++) if (on(gx + dx, gy + dy)) near = true;
+      if (!near || Math.abs(lum(face.data, i) - lum(result, j)) <= 12) continue;
+    }
     face.data[i] = result[j]; face.data[i + 1] = result[j + 1]; face.data[i + 2] = result[j + 2]; face.data[i + 3] = 255; n++;
   }
   return n;

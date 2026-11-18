@@ -198,6 +198,7 @@ test('face pixels under the upper lash take the closed-eye drawing, the eye hole
   face.data[(12 * 20 + 5) * 4 + 3] = 0; // 눈 구멍
   const lash = rect('eyelash_r', 2, 10, 8, 3, [20, 20, 20]);
   const plan = { crop: { x: 0, y: 0, w: 20, h: 20 } }, result = new Uint8ClampedArray(20 * 20 * 4).fill(200);
-  assert.equal(paintUnderLash(face, lash, plan, result), 23);
+  assert.ok(paintUnderLash(face, lash, plan, result) > 23);
+  assert.equal(face.data[(9 * 20 + 3) * 4], 200); // 속눈썹 둘레의 다른 색도 감은 눈 그림으로
   assert.equal(face.data[(10 * 20 + 3) * 4], 200); assert.equal(face.data[(12 * 20 + 5) * 4 + 3], 0); assert.equal(face.data[(5 * 20 + 3) * 4], 240);
 });
