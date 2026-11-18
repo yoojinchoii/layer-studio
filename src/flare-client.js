@@ -122,13 +122,13 @@ const COVER_TEXT = {
 };
 // 파츠별 지시: 가려진 쪽으로 어디까지 이어지는지, 무엇을 그리면 안 되는지.
 const PART_HINT = {
-  face: 'The eyes, eyebrows, eyelashes, nose and mouth are separate layers: paint their places as smooth bare skin only (no eyes, no eye whites, no mouth, no hair strands). The face skin continues up under the bangs to the hairline. ',
+  face: 'The eyes, eyebrows, eyelashes, nose and mouth are separate layers: paint their places as smooth bare skin only (no eyes, no eye whites, no mouth, no hair strands). The face skin continues up under the bangs to the hairline. Any ears hidden under the hair are small, rounded human ears, never pointed. ',
   neck: 'The neck continues a little upward behind the chin and downward under the collar; draw only plain neck skin, never a face, ears or hair. Most of the masked area is not neck: leave it as background. ',
   topwear: 'If the garment has sleeves, its body fabric continues outward under each sleeve: draw full rounded shoulders that reach out to the outer edge of the shoulders, and the sides of the garment going down from the armpits, with the same outline. Do not draw the sleeves themselves, arms, hands, hair or skin. ',
   arm_r: 'The bare arm continues upward under the sleeve to a rounded shoulder; draw that upper arm and shoulder with its outline. ',
   arm_l: 'The bare arm continues upward under the sleeve to a rounded shoulder; draw that upper arm and shoulder with its outline. ',
-  legwear_r: 'The leg continues a little upward under the skirt or shorts and downward into the shoe; draw it with its outline. Do not draw the other leg. ',
-  legwear_l: 'The leg continues a little upward under the skirt or shorts and downward into the shoe; draw it with its outline. Do not draw the other leg. ',
+  legwear_r: 'The leg continues a little upward under the skirt or shorts and down to the ankle as bare skin; draw it with its outline. Never draw a shoe, boot or sock: footwear is a separate layer. Do not draw the other leg. ',
+  legwear_l: 'The leg continues a little upward under the skirt or shorts and down to the ankle as bare skin; draw it with its outline. Never draw a shoe, boot or sock: footwear is a separate layer. Do not draw the other leg. ',
   bottomwear: 'The waistband continues upward a little under the shirt; draw the hidden top of the garment with its outline. ',
   back_hair: 'Draw the hair mass behind the head and neck that the face and front hair were hiding. ',
   irides_r: 'Complete the iris and pupil as one full circle or oval with the same rings, colors and highlight style, including the parts hidden under the eyelid skin and lashes. ',
@@ -180,13 +180,18 @@ export function completionPlan(layers, layer, { reach = COMPLETE_REACH, pad = 16
   for (const l of layers) { W = Math.max(W, l.x + l.width); H = Math.max(H, l.y + l.height); }
   const index = layers.indexOf(layer), vis = new Uint8Array(W * H), cov = new Uint8Array(W * H), front = new Uint8ClampedArray(W * H * 4);
   const covers = new Map();
+  // 뒷머리는 원화에 보이는 곳이 없다: 얼굴 뒤 자리(레이어 모양)를 통째로 그리게 하고, 앞머리를 둘레 참고 그림으로 보여 준다.
+  if (layer.label === 'back_hair') return backHairPlan(layers, layer, W, H, pad);
   for (let y = 0; y < layer.height; y++) for (let x = 0; x < layer.width; x++) {
     const j = y * layer.width + x;
     if (layer.data[j * 4 + 3] > 0 && !layer.fillMask?.[j]) vis[(layer.y + y) * W + layer.x + x] = 1;
   }
+  // 다리는 신발 속을 발목까지만(신발 입구 쪽 35%) 연다: 더 열면 flare가 그 자리에 신발·양말을 그린다.
+  const ankleOnly = /^legwear/.test(layer.label);
   for (const f of layers.slice(0, Math.max(0, index)).reverse()) for (let y = 0; y < f.height; y++) for (let x = 0; x < f.width; x++) {
     const j = y * f.width + x;
     if (f.data[j * 4 + 3] <= 128 || f.fillMask?.[j]) continue;
+    if (ankleOnly && /^footwear/.test(f.label) && y > f.height * 0.35) continue;
     const i = (f.y + y) * W + f.x + x;
     cov[i] = 1; front.set(f.data.subarray(j * 4, j * 4 + 4), i * 4);
     if (!covers.has(f.label)) covers.set(f.label, []);
@@ -195,7 +200,9 @@ export function completionPlan(layers, layer, { reach = COMPLETE_REACH, pad = 16
   // 닿는 거리: 작업 해상도의 reach 비율, 다만 작은 파츠(눈 등)는 제 크기의 60%까지만(얼굴 전체로 번지지 않게)
   let bx0 = W, by0 = H, bx1 = -1, by1 = -1;
   for (let i = 0; i < W * H; i++) if (vis[i]) { const x = i % W, y = (i - x) / W; if (x < bx0) bx0 = x; if (y < by0) by0 = y; if (x > bx1) bx1 = x; if (y > by1) by1 = y; }
-  const dist = distanceFrom(vis, W, H), R = Math.min(Math.max(W, H) * reach, Math.max(8, (Math.max(bx1 - bx0, by1 - by0) + 1) * 0.6));
+  // 흰자·눈동자는 눈 크기의 30%까지만: 더 열면 눈보다 훨씬 큰 공을 그린다(어차피 얼굴의 눈 구멍 둘레만 보인다).
+  const own = /^(eyewhite|irides)/.test(layer.label) ? 0.3 : 0.6;
+  const dist = distanceFrom(vis, W, H), R = Math.min(Math.max(W, H) * reach, Math.max(8, (Math.max(bx1 - bx0, by1 - by0) + 1) * own));
   let x0 = W, y0 = H, x1 = -1, y1 = -1, editable = 0;
   const editAll = new Uint8Array(W * H);
   for (let i = 0; i < W * H; i++) {
@@ -223,6 +230,27 @@ export function completionPlan(layers, layer, { reach = COMPLETE_REACH, pad = 16
   return { x0, y0, w, h, visible: crop(vis), edit: crop(editAll), color, front: crop(front, 4), editable, covering };
 }
 
+/** 뒷머리 계획: edit = 뒷머리 자리(3px 넓힘), color = 둘레의 앞머리(참고용, 파츠에는 넣지 않는다), visible 없음. */
+function backHairPlan(layers, layer, W, H, pad) {
+  const area = new Uint8Array(W * H);
+  for (let y = 0; y < layer.height; y++) for (let x = 0; x < layer.width; x++) if (layer.data[(y * layer.width + x) * 4 + 3] > 0) area[(layer.y + y) * W + layer.x + x] = 1;
+  const d = distanceFrom(area, W, H), editAll = new Uint8Array(W * H);
+  let x0 = W, y0 = H, x1 = -1, y1 = -1, editable = 0;
+  for (let i = 0; i < W * H; i++) if (d[i] <= 3) { editAll[i] = 1; editable++; const x = i % W, y = (i - x) / W; if (x < x0) x0 = x; if (y < y0) y0 = y; if (x > x1) x1 = x; if (y > y1) y1 = y; }
+  if (x1 < 0) return null;
+  const hair = layers.find((l) => l.label === 'front_hair');
+  if (hair) { x0 = Math.min(x0, hair.x); y0 = Math.min(y0, hair.y); x1 = Math.max(x1, hair.x + hair.width - 1); y1 = Math.max(y1, hair.y + hair.height - 1); }
+  x0 = Math.max(0, x0 - pad); y0 = Math.max(0, y0 - pad); x1 = Math.min(W - 1, x1 + pad); y1 = Math.min(H - 1, y1 + pad);
+  const w = x1 - x0 + 1, h = y1 - y0 + 1, edit = new Uint8Array(w * h), color = new Uint8ClampedArray(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) edit[y * w + x] = editAll[(y0 + y) * W + x0 + x];
+  if (hair) for (let y = 0; y < hair.height; y++) for (let x = 0; x < hair.width; x++) {
+    const gx = hair.x + x - x0, gy = hair.y + y - y0, j = (y * hair.width + x) * 4;
+    if (gx < 0 || gy < 0 || gx >= w || gy >= h || edit[gy * w + gx]) continue;
+    color.set(hair.data.subarray(j, j + 4), (gy * w + gx) * 4);
+  }
+  return { x0, y0, w, h, visible: new Uint8Array(w * h), edit, color, front: new Uint8ClampedArray(w * h * 4), editable, covering: [], whole: true };
+}
+
 const WHITE = [255, 255, 255], MAGENTA = [255, 0, 255];
 /** 배경색: 흰색 계열 파츠(흰 옷 등)는 자홍색 배경, 나머지는 흰 배경. */
 export function backgroundFor(plan, label = '') {
@@ -235,6 +263,9 @@ export function backgroundFor(plan, label = '') {
 
 export function completionPrompt(label, covering = [], bgName = 'white', { plain = false } = {}) {
   const part = PART_TEXT[label] || 'part';
+  if (label === 'back_hair') return `Draw one isolated layer of a ${plain ? 'fully clothed, all-ages 2D cartoon game' : '2D anime'} character for Spine skeletal animation. The image shows only the front hair (bangs and side locks) on a flat ${bgName} background; the face has been removed. `
+    + 'Inside the masked area, draw the back part of the same hair that sits behind the head: a hair mass with the same hair color, a slightly darker shade because it is behind, the same strand lines, highlights and outline style. '
+    + `Fill the masked area with hair, following the hair flow. Never draw a face, skin, ears, eyes, neck or clothing. Keep everything outside the mask unchanged.`;
   const cover = covering.length ? covering.join(' and ') : 'other parts';
   // plain: 안전 필터에 걸렸을 때 다시 보내는 순한 문장(맨살 위치 설명을 빼고, 옷을 다 입은 전 연령 캐릭터임을 밝힌다)
   if (plain) return `Complete one isolated layer of a fully clothed, all-ages 2D cartoon game character. The image shows only the ${part} on a flat ${bgName} background. `
@@ -278,7 +309,7 @@ export function mergeCompletion(plan, result, bg = WHITE) {
   }
   // 보이는 파츠와 이어진 조각만(8방향)
   const keep = new Uint8Array(n), queue = [];
-  for (let i = 0; i < n; i++) if (visible[i]) { keep[i] = 1; queue.push(i); }
+  for (let i = 0; i < n; i++) if (visible[i] || (plan.whole && edit[i] && alpha[i] >= 0.5)) { keep[i] = 1; queue.push(i); }
   for (let q = 0; q < queue.length; q++) {
     const i = queue[q], x = i % w, y = (i - x) / w;
     for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
@@ -402,7 +433,7 @@ export async function completePart({ token, layers, layer, signal }) {
   bctx.drawImage(out, t.ox * sx, t.oy * sy, w * t.s * sx, h * t.s * sy, 0, 0, w, h);
   const merged = mergeCompletion(plan, bctx.getImageData(0, 0, w, h).data, bg.rgb);
   if (!merged) throw Error('flare 결과에서 파츠를 찾지 못했어요');
-  if (plan.editable > 4000 && merged.drawn / plan.editable > MAX_FILLED_SHARE) throw Error(`가리던 파츠까지 그린 것 같아 버렸어요 (${Math.round((100 * merged.drawn) / plan.editable)}%)`);
+  if (!plan.whole && plan.editable > 4000 && merged.drawn / plan.editable > MAX_FILLED_SHARE) throw Error(`가리던 파츠까지 그린 것 같아 버렸어요 (${Math.round((100 * merged.drawn) / plan.editable)}%)`);
   return merged;
 }
 

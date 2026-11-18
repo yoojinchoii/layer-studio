@@ -133,3 +133,32 @@ test('vertex weights always sum to exactly 1 after dropping tiny values', () => 
   assert.ok(Math.abs(sum(b) - 1) < 1e-12); assert.ok(Math.abs(b.get('torso') - 0.75) < 1e-12);
   assert.deepEqual([...normalizeBound([['x', NaN]], 'torso')], [['torso', 1]]);
 });
+
+test('back hair is drawn whole behind the face with the front hair only as reference', () => {
+  const hair = rect('front_hair', 0, 0, 20, 4, [120, 70, 40]);
+  const face = rect('face', 5, 4, 10, 10, [250, 215, 195]);
+  const back = rect('back_hair', 5, 4, 10, 8, [100, 60, 30], new Uint8Array(80).fill(1));
+  const plan = completionPlan([hair, face, back], back, { pad: 0 });
+  assert.ok(plan.whole);
+  assert.equal(plan.visible.reduce((a, v) => a + v, 0), 0);
+  assert.equal(plan.edit[(6 - plan.y0) * plan.w + (10 - plan.x0)], 1); // 얼굴 뒤
+  assert.equal(plan.edit[0], 0); assert.equal(plan.color[3], 255); // 앞머리 모서리는 참고 그림
+  assert.match(completionPrompt('back_hair', plan.covering), /behind the head/);
+  const out = new Uint8ClampedArray(plan.w * plan.h * 4).fill(255);
+  for (let i = 0; i < plan.w * plan.h; i++) if (plan.edit[i]) out.set([90, 55, 30, 255], i * 4);
+  const m = mergeCompletion(plan, out, [255, 255, 255]);
+  assert.ok(m && m.drawn >= 80);
+  for (let i = 0; i < m.width * m.height; i++) if (m.data[i * 4 + 3]) assert.equal(m.fillMask[i], 1); // 앞머리 픽셀은 들어가지 않는다
+});
+
+test('legs open only the ankle inside the shoe, eyes only near the eye', () => {
+  const shoe = rect('footwear_r', 0, 20, 10, 20, [90, 50, 30]);
+  const leg = rect('legwear_r', 0, 0, 10, 20, [250, 210, 190]);
+  const plan = completionPlan([shoe, leg], leg, { reach: 1, pad: 0 });
+  const rowOpen = (gy) => plan.edit[(gy - plan.y0) * plan.w + 5] === 1;
+  assert.ok(rowOpen(22)); assert.ok(!rowOpen(35));
+  const lid = rect('face', 0, 0, 60, 60, [250, 215, 195]);
+  const white = rect('eyewhite_r', 20, 20, 20, 20, [250, 250, 250]);
+  const ep = completionPlan([lid, white], white, { reach: 1, pad: 0 });
+  assert.ok(ep.w <= 20 + 2 * 8); // 눈 크기의 30%(최소 8px)까지, 예전 60%면 44
+});
