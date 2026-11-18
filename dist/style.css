@@ -324,3 +324,6 @@ dialog h2{font-size:17px;font-weight:600}
 .rig-inspection-tools select{padding:5px;max-width:150px;font-size:11px}
 .rig-scrubber{flex:1;min-width:180px}.rig-scrubber input{min-width:70px;flex:1;accent-color:#71dfc9}.rig-scrubber output{width:34px}
 @media(max-width:800px){.artwork-editor-layout{grid-template-columns:1fr}.artwork-preview{height:42vh}.artwork-controls{max-height:none}.artwork-footer{position:sticky;bottom:-20px;background:#151e29;padding:12px 0}}
+
+/* 설명 문구 숨김(사용자 요청: 상태·경고만 보인다) */
+#engineNote, #artRawHint, #rigControlNote, #rigMotionHint, #rigArmSplitNote, .stage-empty .empty-caption h2, .stage-empty .empty-caption p { display: none !important; }
