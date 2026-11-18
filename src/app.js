@@ -5,7 +5,7 @@ import {normalizeReport,invalidateArt,manuallyReviewArt,artAllowsRig,installArtR
 import {psdDocument} from './psd-document.js';import {sheetDocument} from './psd-sheet.js';
 import {installRecovery} from './project-store.js';
 import { installConnectionUI } from './connection-ui.js';
-import {FLARE_ENGINE,readToken,saveToken,validToken,tokenRemembered,requestPartMap,requestKeypoints,redrawAll,trimArmRoots,drawEyelids} from './flare-client.js';
+import {FLARE_ENGINE,readToken,saveToken,validToken,tokenRemembered,requestPartMap,requestKeypoints,redrawAll,trimArmRoots,drawEyelids,setDrawModel} from './flare-client.js';
 import { installRigUI } from './rig-ui.js';
 import {inferRig,refineRig,splitLegLayers} from './rig-core.js';
 import { readPsd, writePsd } from 'ag-psd';
@@ -88,12 +88,12 @@ async function runLocal(useFlare=false){if(state.busy||!state.original)return;le
       // 부위 지도와 관절 점을 동시에 요청한다(관절은 실패해도 골격 분석으로 계속).
       const [map,joints]=await Promise.all([requestPartMap({token,source:original,signal:controller.signal}),requestKeypoints({token,source:original,signal:controller.signal}).catch(e=>{if(e.name==='AbortError')throw e;return null;})]);aiLabels=map.labels;aiJoints=joints&&Object.keys(joints).length?joints:null;$('progressTitle').textContent='2/3 · 경계 맞추기·관절·파츠 나누기';$('progressText').textContent='flare 지도를 원화의 선·색 영역에 맞추고 있어요.';}
     const result=await new Promise((resolve,reject)=>{const worker=localEngine(),id=crypto.randomUUID();worker.onmessage=e=>{if(e.data.id!==id)return;e.data.ok?resolve(e.data.result):reject(Error(e.data.error));};worker.onerror=e=>{localWorker=null;reject(Error(e.message||'작업 스레드를 시작하지 못했어요.'));};const transfer=[pixels.buffer];if(aiLabels)transfer.push(aiLabels.buffer);worker.postMessage({id,buffer:pixels.buffer,width,height,...(aiLabels?{aiLabels:aiLabels.buffer}:{}),...(aiJoints?{aiJoints}:{})},transfer);});
-    if(useFlare&&$('flareRedraw').checked){$('progressTitle').textContent='3/3 · 가려진 부분 그리는 중';const r=await redrawAll({token,layers:result.layers,signal:controller.signal,onProgress:(d,n)=>{$('progressText').textContent=n?`flare가 파츠마다 가려진 부분까지 그려 완성하고 있어요 · ${d}/${n}`:'다시 그릴 자리가 없어요.';}});
+    if(useFlare&&$('flareRedraw').checked){setDrawModel($('drawModel')?.value);const drawer=$('drawModel')?.value==='flare'?'flare':'sunburst';$('progressTitle').textContent='3/3 · 가려진 부분 그리는 중';const r=await redrawAll({token,layers:result.layers,signal:controller.signal,onProgress:(d,n)=>{$('progressText').textContent=n?`${drawer}가 파츠마다 가려진 부분까지 그려 완성하고 있어요 · ${d}/${n}`:'다시 그릴 자리가 없어요.';}});
       for(const l of result.layers){const got=r.results.get(l.label);if(got)Object.assign(l,{x:got.x,y:got.y,width:got.width,height:got.height,data:got.data,fillMask:got.fillMask});}
       // 팔은 상의보다 앞 레이어: 어깨 관절 위쪽까지 그린 맨살은 지워야 팔을 들 때 소매 위로 비집고 나오지 않는다.
       trimArmRoots(result.layers.filter(l=>r.results.has(l.label)),result.pipeline.analysis?.joints,width,height);
       // 눈꺼풀: flare가 감은 눈을 그려 얼굴 뒤 눈꺼풀 레이어로(속눈썹에 붙였던 피부 띠는 걷어 냄)
-      $('progressText').textContent='flare가 감은 눈꺼풀을 그리고 있어요.';
+      $('progressText').textContent=`${drawer}가 감은 눈꺼풀을 그리고 있어요.`;
       const lids=await drawEyelids({token,layers:result.layers,signal:controller.signal});r.errors.push(...lids.errors);
       const stage=result.pipeline.stages.find(s=>s.id==='complete');if(stage)stage.detail=`flare가 가려진 부분까지 ${r.results.size}/${r.total}개 파츠를 완성${r.errors.length?` · 실패 ${r.errors.length}개는 알고리즘 채움 유지`:''} (그림은 확인 필요)`;
       if(r.errors.length)result.pipeline.issues=[...(result.pipeline.issues||[]),...r.errors.slice(0,5).map(message=>({code:'redraw',message:`가려진 부분 그리기 실패 · ${message}`}))];}

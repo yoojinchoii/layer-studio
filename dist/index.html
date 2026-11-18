@@ -7,7 +7,7 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="./style.css?v=flare-44">
+<link rel="stylesheet" href="./style.css?v=flare-45">
 </head>
 <body>
 <header class="topbar">
@@ -52,8 +52,10 @@
         <input id="flareToken" type="password" autocomplete="off" spellcheck="false" placeholder="토큰 붙여넣기">
         <label class="switch-row"><span>이 브라우저에 기억</span><input id="flareRemember" type="checkbox"></label>
         <label class="switch-row"><span>가려진 부분까지 flare로 완성</span><input id="flareRedraw" type="checkbox" checked></label>
+        <label class="field-label" for="drawModel">그리는 모델</label>
+        <select id="drawModel"><option value="sunburst" selected>sunburst · 정밀(파츠당 약 25초)</option><option value="flare">flare · 빠름(파츠당 약 10초)</option></select>
         <p class="field-note" id="flareTokenNote"></p>
-        <p class="field-note">토큰은 <a href="https://aiproxy.backoffice.bagelgames.com/" target="_blank" rel="noopener">AI Proxy 콘솔</a>의 My Tokens에서 만들 수 있어요. 기억을 끄면 탭을 닫을 때 지워지고, 저장소·서버에는 보내지 않습니다. 파츠 하나에 flare 1회(약 10초)가 쓰여요.</p>
+        <p class="field-note">토큰은 <a href="https://aiproxy.backoffice.bagelgames.com/" target="_blank" rel="noopener">AI Proxy 콘솔</a>의 My Tokens에서 만들 수 있어요. 기억을 끄면 탭을 닫을 때 지워지고, 저장소·서버에는 보내지 않습니다. 부위 지도·관절은 flare, 가려진 부분 그리기는 고른 모델로 파츠 하나에 1회씩 쓰여요.</p>
       </div>
       <details class="fold">
         <summary>분리 옵션</summary>
@@ -573,6 +575,6 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="./app.js?v=flare-44"></script>
+<script type="module" src="./app.js?v=flare-45"></script>
 </body>
 </html>

@@ -6,6 +6,12 @@ import { segmentationPrompt, classifyMap } from './local-engine/ai-labels.js';
 
 export const FLARE_ENGINE = 'flare';
 export const FLARE_MODEL = 'gpt-image-2.6-flare';
+// 그리기(가려진 부분·뒷머리·눈꺼풀)는 더 정밀한 sunburst가 기본: 옷 주름·레이스·머리결을 원화 비율 그대로 살린다(대신 2~3배 느림).
+// 부위 지도·관절 점은 모양만 맞으면 되니 빠른 flare로.
+export const DRAW_MODELS = { sunburst: 'gpt-image-2.6-sunburst', flare: FLARE_MODEL };
+let drawModel = DRAW_MODELS.sunburst;
+export const setDrawModel = (key) => { drawModel = DRAW_MODELS[key] || DRAW_MODELS.sunburst; };
+export const currentDrawModel = () => drawModel;
 const API_DEFAULT = 'https://aiproxy-api.backoffice.bagelgames.com/openai/v1/images/edits';
 // 개발용: localhost에서만 ?flareApi=http://127.0.0.1:포트 로 중계 서버를 쓸 수 있다(배포 사이트에서는 무시).
 const API = (() => {
@@ -50,9 +56,9 @@ export function fitTransform(w, h, tw, th, margin = 0) {
   return { s, ox: (tw - w * s) / 2, oy: (th - h * s) / 2 };
 }
 
-async function callFlare({ token, image, mask, prompt, size, quality = 'medium', signal }) {
+async function callFlare({ token, image, mask, prompt, size, quality = 'medium', signal, model = FLARE_MODEL }) {
   const form = new FormData();
-  form.append('model', FLARE_MODEL);
+  form.append('model', model);
   form.append('image', image, 'image.png');
   if (mask) form.append('mask', mask, 'mask.png');
   form.append('prompt', prompt);
@@ -180,7 +186,7 @@ const COVER_TEXT = {
 };
 // 파츠별 지시: 가려진 쪽으로 어디까지 이어지는지, 무엇을 그리면 안 되는지.
 const PART_HINT = {
-  face: 'The eyes, eyebrows, eyelashes, nose and mouth are separate layers: paint their places as smooth bare skin only (no eyes, no eye whites, no mouth, no hair strands). The face skin continues up under the bangs to the hairline. Any ears hidden under the hair are small, rounded human ears, never pointed. ',
+  face: 'The eyes, eyebrows, eyelashes, nose and mouth are separate layers: paint their places as smooth bare skin only (no eyes, no eye whites, no mouth, no hair strands). The face skin continues up under the bangs to the hairline. Any ears hidden under the hair are small, rounded human ears, never pointed. This layer is only the bare skin of the face: there is no hair on it at all, so every place where hair lay over or around the face stays flat background except the face skin itself. ',
   neck: 'The neck continues a little upward behind the chin and downward under the collar; draw only plain neck skin, never a face, ears or hair. Most of the masked area is not neck: leave it as background. ',
   topwear: 'If the garment has sleeves, its body fabric continues outward under each sleeve: draw full rounded shoulders that reach out to the outer edge of the shoulders, and the sides of the garment going down from the armpits, with the same outline. Do not draw the sleeves themselves, arms, hands, hair or skin. ',
   arm_r: 'The bare arm continues upward under the sleeve to a rounded shoulder; draw that upper arm and shoulder with its outline. ',
@@ -480,11 +486,11 @@ export async function completePart({ token, layers, layer, signal }) {
   const image = await toBlob(scene), mask = await toBlob(maskCanvas);
   let out;
   try {
-    ({ canvas: out } = await callFlare({ token, image, mask, prompt: completionPrompt(layer.label, plan.covering, bg.name), size, signal }));
+    ({ canvas: out } = await callFlare({ token, image, mask, prompt: completionPrompt(layer.label, plan.covering, bg.name), size, signal, model: drawModel }));
   } catch (e) {
     // 다리·목처럼 맨살 파츠는 안전 필터에 가끔 걸린다: 순한 문장으로 한 번 더.
     if (!/safety|moderation|rejected/i.test(e.message)) throw e;
-    ({ canvas: out } = await callFlare({ token, image, mask, prompt: completionPrompt(layer.label, plan.covering, bg.name, { plain: true }), size, signal }));
+    ({ canvas: out } = await callFlare({ token, image, mask, prompt: completionPrompt(layer.label, plan.covering, bg.name, { plain: true }), size, signal, model: drawModel }));
   }
   const back = make(w, h), bctx = back.getContext('2d', { willReadFrequently: true });
   const sx = out.width / size[0], sy = out.height / size[1];
@@ -496,7 +502,7 @@ export async function completePart({ token, layers, layer, signal }) {
 }
 
 /** 여러 파츠를 동시에 최대 limit개씩 완성한다. 하나가 실패해도 나머지는 계속한다(실패한 파츠는 알고리즘 채움 유지). */
-export async function redrawAll({ token, layers, signal, limit = 3, onProgress = () => {} }) {
+export async function redrawAll({ token, layers, signal, limit = 4, onProgress = () => {} }) {
   const targets = redrawTargets(layers);
   const results = new Map();
   const errors = [];
@@ -685,7 +691,7 @@ export async function drawEyelids({ token, layers, signal }) {
       hctx.putImageData(hd, 0, 0);
       const mask = make(size[0], size[1]), mctx = mask.getContext('2d'); mctx.fillStyle = '#000'; mctx.fillRect(0, 0, size[0], size[1]);
       mctx.globalCompositeOperation = 'destination-out'; mctx.drawImage(hole, t.ox, t.oy, crop.w * t.s, crop.h * t.s);
-      const { canvas: out } = await callFlare({ token, image: await toBlob(scene), mask: await toBlob(mask), prompt: EYELID_PROMPT, size, signal });
+      const { canvas: out } = await callFlare({ token, image: await toBlob(scene), mask: await toBlob(mask), prompt: EYELID_PROMPT, size, signal, model: drawModel });
       const back = make(crop.w, crop.h), bctx = back.getContext('2d', { willReadFrequently: true }), sx = out.width / size[0], sy = out.height / size[1];
       bctx.drawImage(out, t.ox * sx, t.oy * sy, crop.w * t.s * sx, crop.h * t.s * sy, 0, 0, crop.w, crop.h);
       const lid = buildEyelid(plan, bctx.getImageData(0, 0, crop.w, crop.h).data, skin);
