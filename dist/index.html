@@ -7,7 +7,11 @@
 <title>Layer Studio — 캐릭터 레이어 작업실</title>
 <meta name="description" content="캐릭터 이미지와 PSD 레이어를 비교하고 정리하는 나만의 Spine 작업실.">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23111722'/%3E%3Cpath d='m6 11 10-5 10 5-10 5Z' fill='%2367e8d5'/%3E%3Cpath d='m6 17 10 5 10-5M6 23l10 5 10-5' fill='none' stroke='%2367e8d5' stroke-width='2'/%3E%3C/svg%3E">
-<link rel="stylesheet" href="./style.css?v=flare-46">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-title" content="Layer Studio">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="stylesheet" href="./style.css?v=flare-47">
 </head>
 <body>
 <header class="topbar">
@@ -17,6 +21,7 @@
     <span class="chip" id="fileTag">준비</span>
   </div>
   <div class="header-actions">
+    <button class="button ghost" id="installBtn" hidden><i data-lucide="monitor-down"></i><span>앱으로 설치</span></button>
     <button class="button ghost" id="helpBtn"><i data-lucide="circle-help"></i><span>사용 가이드</span></button>
     <button class="button ghost connection-btn" id="connectionBtn"><i data-lucide="plug-zap"></i><span>서버 연결</span></button>
   </div>
@@ -235,12 +240,13 @@
   <form method="dialog"><div class="dialog-heading"><h2>Layer Studio 사용법</h2><button class="icon-button" aria-label="닫기"><i data-lucide="x"></i></button></div></form>
   <ol class="guide-steps">
     <li><b>캐릭터 불러오기</b><p>왼쪽에 원화를 넣거나, 오른쪽 폴더 버튼으로 PSD를 여세요.</p></li>
-    <li><b>AI 레이어 분리</b><p>서버를 연결한 뒤 실행하면 머리카락·얼굴·의상·팔다리가 레이어로 나뉩니다.</p></li>
+    <li><b>AI 레이어 분리</b><p>AI Proxy 개인 토큰을 붙여넣고 실행하면 머리카락·얼굴·의상·팔다리가 레이어로 나뉘고 가려진 부분까지 그려집니다. 토큰은 이 브라우저에만 보관되고 AI Proxy로만 보내집니다. 사용량은 각자 토큰에 쌓여요.</p></li>
     <li><b>관절 편집 · 리깅</b><p>관절 점을 끌어 맞추고 포즈 테스트로 굽혀보세요. 관절 추가, 메쉬·가중치 조정도 여기서 합니다.</p></li>
     <li><b>IK / 개별 관절</b><p>포즈 편집에서 주황 손잡이를 끌면 관절이 회전합니다. 팔·다리를 IK로 바꾸면 파란 손·발 사각점을 끌어 움직일 수 있어요.</p></li>
     <li><b>리깅 템플릿</b><p>템플릿 탭에서 전신·반신·흉상을 자동으로 맞추거나 내 리깅을 저장해 다른 파츠 이미지에 적용하세요. 템플릿 적용에는 AI 사용량이 들지 않습니다.</p></li>
     <li><b>내보내기</b><p>Spine 리그 ZIP(Spine·Unity용), 파츠 PSD, 편집 프로젝트로 저장할 수 있어요.</p></li>
   </ol>
+  <div class="help-note"><strong>앱으로 설치</strong><p>Chrome·Edge는 위쪽 ‘앱으로 설치’ 또는 주소창의 설치 아이콘, Mac Safari는 공유 → ‘Dock에 추가’. 새 버전은 다시 열면 자동으로 반영됩니다.</p></div>
   <div class="help-note"><strong>작업을 이어가려면</strong><p>‘편집 프로젝트 저장’ 파일을 보관하세요. Spine ZIP은 결과물이라 웹에서 다시 열 수 없습니다.</p></div>
 </dialog>
 
@@ -535,6 +541,13 @@
 </dialog>
 
 <div id="toast" role="status" aria-live="polite"></div>
-<script type="module" src="./app.js?v=flare-46"></script>
+<script type="module" src="./app.js?v=flare-47"></script>
+<script>
+(()=>{const b=document.getElementById('installBtn');let ev=null;
+const standalone=()=>matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+addEventListener('beforeinstallprompt',e=>{e.preventDefault();ev=e;if(!standalone())b.hidden=false;});
+addEventListener('appinstalled',()=>{b.hidden=true;ev=null;});
+b.onclick=async()=>{if(!ev)return;ev.prompt();await ev.userChoice;ev=null;b.hidden=true;};})();
+</script>
 </body>
 </html>
