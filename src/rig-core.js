@@ -434,13 +434,17 @@ export function normalizeBound(pairs,fallback){const bound=new Map();for(const [
   if(!(sum>0))return new Map([[fallback,1]]);for(const [b,w]of bound)bound.set(b,w/sum);return bound;}
 // 얼굴 바탕처럼 안쪽이 고르게 휘어야 하는 파츠: 그림이 있는 자리에 n×n 격자 정점(레퍼 얼굴 메쉬는 정점 270~300개).
 const skirtPoints=layer=>interiorGrid(layer,9);
+// 머리카락: 전체는 성긴 격자, 얼굴 둘레(얼굴 상자 ±30%)는 얼굴 폭의 1/8 간격. 고개를 돌릴 때 볼 위 머리카락이 볼 윤곽과 같은 양만큼 움직이게.
+function hairGrid(layer,rig){if(!layer.data)return [];const f=rig.faceGeometry?.face,out=interiorGrid(layer,8);if(!f)return out;const step=Math.max(4,f.width/8),m=f.width*.3;
+  for(let gy=f.y-m;gy<f.y+f.height+m;gy+=step)for(let gx=f.x-m;gx<f.x+f.width+m;gx+=step){const x=gx-layer.x,y=gy-layer.y;if(x<0||y<0||x>=layer.width||y>=layer.height)continue;if(layer.data[(Math.floor(y)*layer.width+Math.floor(x))*4+3]>8)out.push([x,y]);}
+  return out;}
 function interiorGrid(layer,n){if(!layer.data)return [];const out=[],step=Math.max(layer.width,layer.height)/n;
   for(let y=step/2;y<layer.height;y+=step)for(let x=step/2;x<layer.width;x+=step)if(layer.data[(Math.floor(y)*layer.width+Math.floor(x))*4+3]>8)out.push([x,y]);return out;}
 export function buildMesh(layer,rig,mode,bone,setup){
   const guide=weightGuide(layer,rig,mode,bone,layer.x+layer.width/2,layer.y+layer.height/2);
   if(mode==='torso')for(const side of ['left','right']){if(layer.detachedSleeves?.includes(side))continue;const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`];const d=A&&E&&unit(E.x-A.x,E.y-A.y);if(d)guide.joints=[...guide.joints,{id:`arm_${side}`,p:A,dir:d,band:Math.hypot(E.x-A.x,E.y-A.y)*.2}];}
   if(mode==='bottoms')guide.joints=['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?weightGuide(layer,rig,mode,bone,h.x,h.y).joints:[];});
-  const extra=mode==='face'?[...faceCandidates(rig,bone).flatMap(id=>{const p=rig.points[id],r=Math.min(layer.width,layer.height)*(/eye|brow|mouth|nose/.test(id)?.06:.12);return [[p.x-layer.x,p.y-layer.y],...[[r,0],[-r,0],[0,r],[0,-r]].map(([dx,dy])=>[p.x-layer.x+dx,p.y-layer.y+dy])];}),...(bone==='face_root'?interiorGrid(layer,11):[])]:mode==='bottoms'?(rig.skirtChains?skirtPoints(layer,rig):crotchPoints(layer,rig)):[];
+  const extra=mode==='face'?[...faceCandidates(rig,bone).flatMap(id=>{const p=rig.points[id],r=Math.min(layer.width,layer.height)*(/eye|brow|mouth|nose/.test(id)?.06:.12);return [[p.x-layer.x,p.y-layer.y],...[[r,0],[-r,0],[0,r],[0,-r]].map(([dx,dy])=>[p.x-layer.x+dx,p.y-layer.y+dy])];}),...(bone==='face_root'?interiorGrid(layer,11):/^face_hair_/.test(bone)?hairGrid(layer,rig):[])]:mode==='bottoms'?(rig.skirtChains?skirtPoints(layer,rig):crotchPoints(layer,rig)):[];
   // 정점 하나의 웨이트(뼈→값). 관절 띠·옷 규칙은 weightGuide/guideWeights가, 세분화는 weight-refine.js가 맡는다.
   const weightAt=(lx0,ly0)=>{const x=layer.x+lx0,y=layer.y+ly0;
     const g=mode==='bottoms'||mode==='legs'||mode==='feet'?weightGuide(layer,rig,mode,bone,x,y):guide;
@@ -514,13 +518,21 @@ function templateAnimations(rig,ikNames,amplitude){
 }
 // 조종 뼈 이동량에 곱할 비율: 코가 가장 많이, 볼은 적게(가까운 것은 많이, 먼 것은 적게 움직이는 시차).
 // 눈·눈썹은 볼(face_left/right)의 자식이라 볼 이동에 더해진다.
-// 사용자 레퍼(Alice·옥토버페스트·아기 악마)처럼 조종 뼈가 얼굴 폭의 약 7%를 움직이면 눈·입은 0.8, 코 0.95, 앞머리 0.5,
+// 사용자 레퍼(Alice·옥토버페스트·아기 악마)처럼 조종 뼈가 얼굴 폭의 약 7%를 움직이면 눈·입은 0.8, 코 0.95, 앞머리 0.3(볼과 같게: 더 크면 볼 가장자리가 드러남),
 // 볼 0.3, 뒷머리는 반대로 -0.35 따라와 고개를 돌린 듯한 시차가 난다. 값은 '최종 비율'이고, 부모(예: 눈의 부모인 볼)가
 // 이미 따라온 몫은 빼서 각 뼈 제약 비율로 쓴다.
-export const FACE_TURN_TOTAL={face_nose:.95,face_mouth:.8,face_jaw:.4,face_left:.3,face_right:.3,face_eye_left:.8,face_eye_right:.8,face_brow_left:.8,face_brow_right:.8,face_pupil_left:.8,face_pupil_right:.8,face_hair_front:.5,face_hair_back:-.35};
+export const FACE_TURN_TOTAL={face_nose:.95,face_mouth:.8,face_jaw:.4,face_left:.3,face_right:.3,face_eye_left:.8,face_eye_right:.8,face_brow_left:.8,face_brow_right:.8,face_pupil_left:.8,face_pupil_right:.8,face_hair_front:.3,face_hair_back:-.35};
 export function faceTurnMixes(rig,active=new Set(activeIds(rig))){
   const inherited=id=>{let p=rig.parents[id];while(p&&p!=='face_turn'&&p!=='root'){if(p in FACE_TURN_TOTAL&&active.has(p))return FACE_TURN_TOTAL[p];p=rig.parents[p];}return 0;};
-  return Object.entries(FACE_TURN_TOTAL).filter(([id])=>active.has(id)).map(([id,total])=>[id,Math.round((total-inherited(id))*100)/100]).filter(([,mix])=>Math.abs(mix)>=.01);
+  // 얼굴 가장자리(앞머리 경계)에 붙은 눈(3/4 얼굴의 먼 쪽 눈)은 옆으로 덜 움직인다: 가장자리까지 거리가 눈 폭의 35%보다 짧으면
+  // 볼·앞머리 비율(0.3) 쪽으로 낮춘다. 그대로 0.8이면 눈 둘레 피부가 머리카락 밖으로 밀려 틈·흰자가 드러난다.
+  const totals={...FACE_TURN_TOTAL};
+  for(const side of ['left','right']){const e=rig.faceGeometry?.eyes?.[side];if(!Number.isFinite(e?.edge))continue;const t=Math.max(0,Math.min(1,e.edge/(e.width*.35))),k=t*t*(3-2*t),base=FACE_TURN_TOTAL[`face_${side}`];
+    for(const id of [`face_eye_${side}`,`face_brow_${side}`,`face_pupil_${side}`])totals[id]=Math.round((base+(FACE_TURN_TOTAL[id]-base)*k)*100)/100;}
+  const inh=id=>{let p=rig.parents[id];while(p&&p!=='face_turn'&&p!=='root'){if(p in totals&&active.has(p))return totals[p];p=rig.parents[p];}return 0;};
+  // 머리카락 조종 뼈는 수평 축(face_ 뼈) 아래일 때만: 위를 향한 뼈 아래면 가로 이동이 세로로 적용된다(예전 프로젝트).
+  for(const id of ['face_hair_front','face_hair_back'])if(!String(rig.parents[id]||'').startsWith('face_'))delete totals[id];
+  return Object.entries(totals).filter(([id])=>active.has(id)).map(([id,total])=>[id,Math.round((total-inh(id))*100)/100]).filter(([,mix])=>Math.abs(mix)>=.01);
 }
 export function makeSkeleton(parts,rig,amplitude=1){
   const P=rig.points,root=P.root,setup=setupPose(rig),world=setup.world,active=new Set(activeIds(rig)),order=setup.order.filter(id=>active.has(id));setup.order=order;

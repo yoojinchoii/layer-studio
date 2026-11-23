@@ -64,7 +64,7 @@ function sideOf(key, x, rig) {
  * @param {{partLabels:Int32Array,parts:Array}} partsResult
  * @param {Uint8Array} ai 작업 해상도 픽셀별 AI 범주(classifyMap 결과)
  */
-export function applyAiLabels(seg, rig, partsResult, ai, { regionShare = 0.88 } = {}) {
+export function applyAiLabels(seg, rig, partsResult, ai, { regionShare = 0.88, pin = null } = {}) {
   const { width: w, height: h, labels, fg } = seg;
   const n = w * h;
   const K = AI_CLASSES.length + 1;
@@ -95,7 +95,7 @@ export function applyAiLabels(seg, rig, partsResult, ai, { regionShare = 0.88 } 
   for (let i = 0; i < n; i++) {
     if (!fg[i]) continue;
     const old = oldNames.get(partsResult.partLabels[i]) || null;
-    const k = regionClass[labels[i]] || ai[i];
+    const k = pin?.[i] || regionClass[labels[i]] || ai[i];
     const key = keyOf(k);
     let name = old;
     // 팔짱(handwear)은 알고리즘 판단을 지킨다: 좌우로 쪼개면 가슴 고정 리깅이 깨진다.

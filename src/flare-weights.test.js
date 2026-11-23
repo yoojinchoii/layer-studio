@@ -177,6 +177,12 @@ test('flare eyelid hides above the eye at rest and covers the whole opening afte
   for (let x = 0; x < lid.width; x++) { let n = 0; for (let y = 0; y < lid.height; y++) if (lid.data[(y * lid.width + x) * 4 + 3]) n++; assert.equal(n, 6); }
   const eyeAgain = new Uint8ClampedArray(skin.length).fill(255);
   assert.equal(buildEyelid(plan, eyeAgain, [240, 205, 185]), null); // 눈을 그대로 그리면 버림
+  // 페인팅풍: 눈가 음영(보랏빛)이 둘레에도 있으면 감은 눈꺼풀로 받는다. 눈동자색(파랑)을 그대로 그린 것은 버린다.
+  const shade = skin.slice(); const inside = (px, py) => { const gx = px + plan.crop.x, gy = py + plan.crop.y; return gx >= plan.x0 && gx <= plan.x1 && gy >= plan.top.get(gx) && gy <= plan.bot.get(gx); };
+  for (let py = 0; py < plan.crop.h; py++) for (let px = 0; px < plan.crop.w; px++) { const gy = py + plan.crop.y; if (inside(px, py) || Math.abs(gy - 18) <= 1) shade.set([165, 115, 150, 255], (py * plan.crop.w + px) * 4); }
+  assert.ok(buildEyelid(plan, shade, [240, 205, 185]), 'shaded lid with the same shade around the eye is kept');
+  const blue = skin.slice(); for (let py = 0; py < plan.crop.h; py++) for (let px = 0; px < plan.crop.w; px++) if (inside(px, py)) blue.set([40, 120, 230, 255], (py * plan.crop.w + px) * 4);
+  assert.equal(buildEyelid(plan, blue, [240, 205, 185]), null);
   assert.equal(facePartKind('eyelid_r'), 'lid_cover'); assert.equal(facePartKind('eyelash_r'), 'lids');
   const lash = rect('eyelash_r', 0, 0, 2, 2, [0, 0, 0], new Uint8Array([0, 1, 1, 0]));
   assert.equal(stripLashBand(lash), 2); assert.equal(lash.data[7], 0); assert.equal(lash.data[3], 255);

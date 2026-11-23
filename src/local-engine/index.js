@@ -7,6 +7,7 @@ import { fitJoints, applyAiJoints } from './skeleton.js';
 import { assignParts } from './parts.js';
 import { buildLayers } from './layers.js';
 import { applyAiLabels } from './ai-labels.js';
+import { mergeFaceMap } from './face-map.js';
 
 export const LOCAL_ENGINE_ID = 'local-algo';
 export const LOCAL_WORK_SIZE = 1024;
@@ -115,10 +116,12 @@ export function runLocalEngine(rgba, width, height, params = {}) {
   t.push(performance.now());
   let parts = assignParts(seg, rig);
   // flare 부위 지도가 있으면 의미는 AI, 경계는 색 영역으로 다시 배정한다.
-  if (params.aiLabels) parts = applyAiLabels(seg, rig, parts, params.aiLabels);
+  // 얼굴 세부 지도(있으면)가 얼굴 상자 안의 머리카락·얼굴 경계를 먼저 고친다.
+  const merged = params.aiLabels && params.aiFace ? mergeFaceMap(params.aiLabels, params.aiFace) : null;
+  if (params.aiLabels) parts = applyAiLabels(seg, rig, parts, merged?.labels || params.aiLabels, { pin: merged?.pin });
   parts.regionCount = seg.regions.length;
   t.push(performance.now());
-  const built = buildLayers(rgba, width, height, seg, rig, parts);
+  const built = buildLayers(rgba, width, height, seg, rig, parts, { aiFace: params.aiFace });
   t.push(performance.now());
   const names = new Set(built.layers.map((l) => l.name));
   const frame = frameOf(rig, names, width, height, built.layers);

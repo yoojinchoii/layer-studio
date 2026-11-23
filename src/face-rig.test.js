@@ -18,7 +18,7 @@ test('bust uses face rig, no shoulders/hips/limb IK, and frame detection uses op
 test('face vertices reconstruct source positions, weights are local and bounded, no clothing movement from face controls',()=>{
  const ls=layers(),r=applyBuiltin('bust',ls,200,240).rig,parts=buildParts(ls,r),sk=makeSkeleton(parts,r),rest=poseMatrices(sk);
  assert.equal(sk.ik,undefined);
- for(const part of parts){const a=sk.skins[0].attachments[part.slot][part.slot];if(a.type!=='mesh')continue;assert.ok(a.uvs.length/2<(part.slot==='face'?200:85));const vertices=meshWorldVertices(a,sk,rest);let k=0;
+ for(const part of parts){const a=sk.skins[0].attachments[part.slot][part.slot];if(a.type!=='mesh')continue;assert.ok(a.uvs.length/2<(/^(face|hair)/.test(part.slot)?200:85));const vertices=meshWorldVertices(a,sk,rest);let k=0;
   for(let i=0;i<vertices.length;i++){near(vertices[i],[part.x+a.uvs[2*i]*part.width-r.points.root.x,r.points.root.y-part.y-a.uvs[2*i+1]*part.height]);let total=0,n=a.vertices[k++];assert.ok(n<=4);for(let j=0;j<n;j++){const name=sk.bones[a.vertices[k]].name;assert.ok(!/arm|forearm|hand|thigh|shin|foot|lower_body/.test(name));total+=a.vertices[k+3];k+=4;}assert.ok(Math.abs(total-1)<1e-6);}
  }
  const before=motionPoints(r);r.pose.head=15;const p=motionPoints(r).face_left;moveFaceControl(r,'face_left',{x:p.x+5,y:p.y+3});const after=motionPoints(r);near([after.chest.x,after.chest.y],[before.chest.x,before.chest.y]);

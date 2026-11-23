@@ -27,10 +27,11 @@ export function demoMotionSpecs(rig,world,amplitude){
   const look=p=>ease((p-.45)/.06)*(1-ease((p-.64)/.08));
   const move=(id,dx,dy)=>{const a=-(world[rig.parents[id]]?.angle||0)*Math.PI/180,c=Math.cos(a),s=Math.sin(a);return [dx*c+dy*s,dx*s-dy*c];};
   const out={
-    head_sway:{duration:4,spec:{neck:{rotate:p=>sin(p)*1.5*A},head:{rotate:p=>sin(p)*4*A},hair:{rotate:p=>-sin(p)*1.5*A},face_hair_front:{rotate:p=>-sin(p)*1.5*A},face_hair_back:{rotate:p=>-sin(p)*A}}},
+    // 머리카락은 머리와 같이 돌고 끝(가닥 체인)만 늦게 흔들린다: 앞머리 조종 뼈를 돌리면 피벗(머리카락 아래쪽)에서 먼 얼굴 옆 머리가 밀려 볼 윤곽이 드러난다.
+    head_sway:{duration:4,spec:{neck:{rotate:p=>sin(p)*1.5*A},head:{rotate:p=>sin(p)*4*A}}},
     face_gaze:{duration:4,spec:{}},face_expression:{duration:4,spec:{}},idle_face:{duration:4,spec:{}},
-    // 고개 돌리기: 조종 뼈가 얼굴 폭의 7%만큼 좌우로(레퍼 값: 눈·입 0.8 비율로 따라옴), 반 박자에 살짝 끄덕임. 머리는 살짝 기울고 눈동자는 먼저 돌아간다.
-    face_turn:{duration:4,spec:{face_turn:{translate:p=>move('face_turn',sin(p)*fw*TURN*A,-Math.sin(p*Math.PI*4)*fh*.012*A)},head:{rotate:p=>-sin(p)*1.2*A},face_hair_front:{rotate:p=>sin(p,1)*.8*A}}},
+    // 고개 돌리기: 조종 뼈가 얼굴 폭의 7%만큼 좌우로(레퍼 값: 눈·입 0.8 비율로 따라옴), 반 박자에 살짝 끄덕임. 머리는 살짝 기울어진다.
+    face_turn:{duration:4,spec:{face_turn:{translate:p=>move('face_turn',sin(p)*fw*TURN*A,-Math.sin(p*Math.PI*4)*fh*.012*A)},head:{rotate:p=>-sin(p)*1.2*A}}},
     upper_sway:{duration:4,spec:{upper:{rotate:p=>sin(p)*2.5*A},chest:{rotate:p=>sin(p)*1.5*A,scale:p=>[1,1+pulse(p)*.015*A]},head:{rotate:p=>-sin(p)*2*A},hair:{rotate:p=>-sin(p)*1.5*A}}},
     upper_gesture:{duration:4,spec:{chest:{rotate:p=>sin(p)*1.5*A},head:{rotate:p=>-sin(p)*2*A}}}
   };
@@ -42,18 +43,18 @@ export function demoMotionSpecs(rig,world,amplitude){
     // 속눈썹은 face-rig가 잰 거리(위 속눈썹 아래끝 → 얼굴 눈 구멍 아래끝, 눈꺼풀 높이의 30~90%)만큼. 없으면 흰자 높이의 95%
     const drop=measured??(H?H*.6:h*.95),cover=`face_lid_cover_${side}`,coverK=(H??drop)/drop;
     out.face_gaze.spec[pupil]={translate:p=>move(pupil,sin(p)*w*.07*A,sin(p*2)*h*.08*A)};
-    out.face_turn.spec[pupil]={translate:p=>move(pupil,sin(p+.04)*w*.08*A,0)};
-    out.idle_face.spec[pupil]={translate:p=>move(pupil,look(p)*w*.08*A,0)};
+    // 고개 돌리기는 눈 전체가 0.8로 따라가므로 눈동자만 따로 앞서 가지 않는다: 완성한 눈동자·흰자 그림의 작은 흠이 눈 구멍 사이로 어긋나 보인다.
+    out.idle_face.spec[pupil]={translate:p=>move(pupil,look(p)*w*.05*A,0)};
     for(const vertical of ['upper','lower']){
       const id=`face_lid_${vertical}_${side}`;
       out.face_gaze.spec[id]={translate:p=>move(id,sin(p)*w*.07*A*.45,sin(p*2)*h*.08*A*.55)};
       out.face_expression.spec[id]={translate:p=>move(id,0,vertical==='upper'?Math.max(pulse(p)*h*.16*A,blink(p,.5)*drop):-pulse(p)*h*.08*A)};
-      out.idle_face.spec[id]={translate:p=>move(id,look(p)*w*.08*A*.45,blink(p,.78)*(vertical==='upper'?drop:-h*.1))};
+      out.idle_face.spec[id]={translate:p=>move(id,look(p)*w*.05*A*.45,blink(p,.78)*(vertical==='upper'?drop:-h*.1))};
     }
     if(rig.activeBones?.includes(cover)){
       out.face_gaze.spec[cover]={translate:p=>move(cover,sin(p)*w*.07*A*.45,sin(p*2)*h*.08*A*.55*coverK)};
       out.face_expression.spec[cover]={translate:p=>move(cover,0,Math.max(pulse(p)*h*.16*A,blink(p,.5)*drop)*coverK)};
-      out.idle_face.spec[cover]={translate:p=>move(cover,look(p)*w*.08*A*.45,blink(p,.78)*drop*coverK)};
+      out.idle_face.spec[cover]={translate:p=>move(cover,look(p)*w*.05*A*.45,blink(p,.78)*drop*coverK)};
     }
     out.face_expression.spec[brow]={translate:p=>move(brow,0,-sin(p)*fh*.012*A)};
     out.idle_face.spec[brow]={translate:p=>move(brow,0,-look(p)*fh*.01*A)};

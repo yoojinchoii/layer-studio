@@ -24,10 +24,14 @@ test('skirt is detected only when cloth joins the legs; shorts with a gap stay l
   assert.ok(Math.abs(sway.skirt_left_1.rotate(0)-sway.skirt_left_1.rotate(1))<1e-9);
 });
 test('face turn mixes follow the reference totals and subtract what the parent already carries',()=>{
-  const rig={parents:{face_left:'face_root',face_eye_left:'face_left',face_brow_left:'face_eye_left',face_mouth:'face_root',face_hair_back:'head',face_hair_front:'hair'}};
+  const rig={parents:{face_left:'face_root',face_eye_left:'face_left',face_brow_left:'face_eye_left',face_mouth:'face_root',face_hair_back:'face_root',face_hair_front:'face_root'}};
   const mix=Object.fromEntries(faceTurnMixes(rig,new Set(Object.keys(rig.parents))));
   assert.equal(mix.face_left,.3);assert.equal(mix.face_eye_left,.5);assert.equal(mix.face_brow_left,undefined);assert.equal(mix.face_mouth,.8);
   assert.equal(mix.face_hair_front,FACE_TURN_TOTAL.face_hair_front);assert.ok(mix.face_hair_back<0);
+  // 위를 향한 뼈(hair) 아래의 머리카락 조종 뼈는 제약에서 뺀다(가로 이동이 세로로 적용되므로)
+  const legacy={parents:{...rig.parents,face_hair_front:'hair'}};assert.equal(Object.fromEntries(faceTurnMixes(legacy,new Set(Object.keys(legacy.parents)))).face_hair_front,undefined);
+  // 얼굴 윤곽에 붙은 먼 쪽 눈(3/4 얼굴)은 볼 비율 쪽으로 낮춘다
+  const far={...rig,faceGeometry:{eyes:{left:{width:30,edge:0}}}};assert.equal(Object.fromEntries(faceTurnMixes(far,new Set(Object.keys(rig.parents)))).face_eye_left,undefined);
 });
 const layer=(name,x,y,width,height)=>({name,x,y,width,height,data:new Uint8ClampedArray(width*height*4).fill(255),opacity:1,visible:true});
 test('lash, nose and mouth sprites share the face weights under them so they cannot tear off when the face turns',()=>{

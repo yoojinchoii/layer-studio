@@ -3,6 +3,7 @@
 // 토큰은 이 브라우저에만 보관한다(기본: 탭을 닫으면 지워지는 sessionStorage, 선택 시 localStorage).
 
 import { segmentationPrompt, classifyMap } from './local-engine/ai-labels.js';
+import { faceMapPrompt, classifyFaceMap, faceCropBox } from './local-engine/face-map.js';
 
 export const FLARE_ENGINE = 'flare';
 export const FLARE_MODEL = 'gpt-image-2.6-flare';
@@ -111,6 +112,27 @@ export async function requestPartMap({ token, source, signal }) {
   const sx = map.width / size[0], sy = map.height / size[1];
   bctx.drawImage(map, t.ox * sx, t.oy * sy, w * t.s * sx, h * t.s * sy, 0, 0, w, h);
   return { labels: classifyMap(bctx.getImageData(0, 0, w, h).data, w * h), preview: back };
+}
+
+/**
+ * 얼굴 세부 지도: 전신 지도의 얼굴 덩어리 둘레를 원본 해상도에서 잘라 크게 보내고, 결과를 작업 해상도 범주로 돌려준다.
+ * @param {{token:string, source:HTMLCanvasElement, full:CanvasImageSource & {width:number,height:number}, labels:Uint8Array, signal?:AbortSignal}} o
+ * source = 작업 해상도 원화, full = 원본 해상도 원화, labels = 전신 지도 범주
+ */
+export async function requestFaceMap({ token, source, full, labels, signal }) {
+  const w = source.width, h = source.height, box = faceCropBox(labels, w, h);
+  if (!box) return null;
+  const k = full.width / w, B = { x: box.x * k, y: box.y * k, width: box.width * k, height: box.height * k };
+  const size = flareSize(B.width, B.height), t = fitTransform(B.width, B.height, size[0], size[1]);
+  const input = make(size[0], size[1]), ctx = input.getContext('2d');
+  ctx.fillStyle = '#fff'; ctx.fillRect(0, 0, size[0], size[1]);
+  ctx.drawImage(full, B.x, B.y, B.width, B.height, t.ox, t.oy, B.width * t.s, B.height * t.s);
+  const { canvas: map } = await callFlare({ token, image: await toBlob(input), prompt: faceMapPrompt(), size, signal });
+  const back = make(w, h), bctx = back.getContext('2d', { willReadFrequently: true });
+  bctx.fillStyle = '#fff'; bctx.fillRect(0, 0, w, h); bctx.imageSmoothingEnabled = false;
+  const sx = map.width / size[0], sy = map.height / size[1];
+  bctx.drawImage(map, t.ox * sx, t.oy * sy, B.width * t.s * sx, B.height * t.s * sy, box.x, box.y, box.width, box.height);
+  return classifyFaceMap(bctx.getImageData(0, 0, w, h).data, w * h);
 }
 
 // ── 관절: flare가 흰 바탕에 관절마다 정해진 색 점을 찍고, 점의 위치를 읽는다 ──
@@ -587,10 +609,20 @@ export function compositeCrop(layers, crop) {
 export function buildEyelid(plan, result, skin) {
   const { x0, x1, top, bot, minTop, S, crop } = plan, width = x1 - x0 + 1, height = S;
   const at = (gx, gy) => { const cx = Math.min(crop.w - 1, Math.max(0, gx - crop.x)), cy = Math.min(crop.h - 1, Math.max(0, gy - crop.y)); return result.subarray((cy * crop.w + cx) * 4, (cy * crop.w + cx) * 4 + 3); };
+  // 눈 둘레(구멍 밖 2~6px)의 실제 색: 페인팅풍은 눈가 음영(보랏빛 그림자)·옆 머리카락이 있어 얼굴 대표색 하나로는 피부를 못 가린다.
+  const inHole = (x, y) => x >= x0 && x <= x1 && y >= top.get(x) - 1 && y <= bot.get(x) + 1;
+  const ring = [];
+  let maxBot = minTop; for (let x = x0; x <= x1; x++) maxBot = Math.max(maxBot, bot.get(x));
+  for (let y = minTop - 6; y <= maxBot + 6; y += 2) for (let x = x0 - 6; x <= x1 + 6; x += 2) {
+    if (inHole(x, y) || x < crop.x || y < crop.y || x >= crop.x + crop.w || y >= crop.y + crop.h) continue;
+    let near = false; for (let dy = -2; dy <= 2 && !near; dy++) for (let dx = -2; dx <= 2; dx++) if (inHole(x + dx, y + dy)) { near = true; break; }
+    if (!near) ring.push(at(x, y));
+  }
+  const skinLike = (c) => Math.hypot(c[0] - skin[0], c[1] - skin[1], c[2] - skin[2]) <= 70 || ring.some((q) => Math.hypot(c[0] - q[0], c[1] - q[1], c[2] - q[2]) <= 45);
   let n = 0, far = 0, white = 0;
   for (let x = x0; x <= x1; x++) for (let y = top.get(x); y <= bot.get(x); y++) {
     const c = at(x, y); n++;
-    if (Math.hypot(c[0] - skin[0], c[1] - skin[1], c[2] - skin[2]) > 70) far++;
+    if (!skinLike(c)) far++;
     if (c[0] > 235 && c[1] > 235 && c[2] > 235) white++;
   }
   // 감은 눈 선·주름은 피부와 다르므로 35%까지 허용(흰 픽셀이 10%를 넘으면 눈을 그대로 그린 것)
@@ -675,6 +707,34 @@ function skinOf(layers) {
 }
 
 /** 양쪽 눈꺼풀을 flare로 그려 레이어를 만든다. 얼굴 바로 뒤에 끼우고 속눈썹의 피부 띠는 걷어 낸다. */
+/**
+ * 흰자·눈동자는 얼굴 뒤에서 눈 구멍으로만 보인다: 완성하며 얼굴 윤곽 밖(머리카락 밑)까지 그려진 부분은 지운다.
+ * 남겨 두면 고개를 돌리거나 머리카락이 흔들릴 때 얼굴 밖으로 흰 조각이 드러난다.
+ * @returns {number} 지운 픽셀 수
+ */
+export function clipEyesToFace(layers) {
+  const face = layers.find((l) => l.label === 'face'); if (!face) return 0;
+  // 얼굴 윤곽 안쪽 = 얼굴 픽셀 + 그 안에 갇힌 구멍(눈 자리). 바깥과 이어진 빈칸만 '얼굴 밖'.
+  const W = face.width, H = face.height, outside = new Uint8Array(W * H), q = [];
+  const push = (i) => { if (!outside[i] && face.data[i * 4 + 3] <= 128) { outside[i] = 1; q.push(i); } };
+  for (let x = 0; x < W; x++) { push(x); push((H - 1) * W + x); }
+  for (let y = 0; y < H; y++) { push(y * W); push(y * W + W - 1); }
+  for (let k = 0; k < q.length; k++) { const i = q[k], x = i % W; if (x > 0) push(i - 1); if (x < W - 1) push(i + 1); if (i >= W) push(i - W); if (i < W * (H - 1)) push(i + W); }
+  const alpha = (gx, gy) => { const x = gx - face.x, y = gy - face.y; return x < 0 || y < 0 || x >= W || y >= H || outside[y * W + x] ? 0 : 255; };
+  let cut = 0;
+  for (const l of layers) {
+    if (!/^(eyewhite|irides)_/.test(l.label)) continue;
+    for (let y = 0; y < l.height; y++) for (let x = 0; x < l.width; x++) {
+      const j = (y * l.width + x) * 4; if (!l.data[j + 3]) continue;
+      // 얼굴 픽셀(구멍 포함 1px 안쪽 여유)이 둘레 3px 안에 있으면 남긴다
+      let inside = false;
+      for (let dy = -3; dy <= 3 && !inside; dy++) for (let dx = -3; dx <= 3; dx++) if (alpha(l.x + x + dx, l.y + y + dy) > 128) { inside = true; break; }
+      if (!inside) { l.data[j + 3] = 0; cut++; }
+    }
+  }
+  return cut;
+}
+
 export async function drawEyelids({ token, layers, signal }) {
   const made = [], errors = [], skin = skinOf(layers);
   await Promise.all(['r', 'l'].map(async (side) => {
@@ -691,12 +751,19 @@ export async function drawEyelids({ token, layers, signal }) {
       hctx.putImageData(hd, 0, 0);
       const mask = make(size[0], size[1]), mctx = mask.getContext('2d'); mctx.fillStyle = '#000'; mctx.fillRect(0, 0, size[0], size[1]);
       mctx.globalCompositeOperation = 'destination-out'; mctx.drawImage(hole, t.ox, t.oy, crop.w * t.s, crop.h * t.s);
-      const { canvas: out } = await callFlare({ token, image: await toBlob(scene), mask: await toBlob(mask), prompt: EYELID_PROMPT, size, signal, model: drawModel });
-      const back = make(crop.w, crop.h), bctx = back.getContext('2d', { willReadFrequently: true }), sx = out.width / size[0], sy = out.height / size[1];
-      bctx.drawImage(out, t.ox * sx, t.oy * sy, crop.w * t.s * sx, crop.h * t.s * sy, 0, 0, crop.w, crop.h);
-      const lid = buildEyelid(plan, bctx.getImageData(0, 0, crop.w, crop.h).data, skin);
+      // 거부되면 다른 모델로 한 번 더(한쪽 눈만 눈꺼풀이 없으면 깜빡일 때 그 눈만 구멍이 드러난다)
+      const image = await toBlob(scene), maskBlob = await toBlob(mask);
+      let lid = null, result = null;
+      for (const model of [...new Set([drawModel, drawModel === DRAW_MODELS.flare ? DRAW_MODELS.sunburst : DRAW_MODELS.flare])]) {
+        const { canvas: out } = await callFlare({ token, image, mask: maskBlob, prompt: EYELID_PROMPT, size, signal, model });
+        const back = make(crop.w, crop.h), bctx = back.getContext('2d', { willReadFrequently: true }), sx = out.width / size[0], sy = out.height / size[1];
+        bctx.drawImage(out, t.ox * sx, t.oy * sy, crop.w * t.s * sx, crop.h * t.s * sy, 0, 0, crop.w, crop.h);
+        result = bctx.getImageData(0, 0, crop.w, crop.h).data;
+        lid = buildEyelid(plan, result, skin);
+        if (lid) break;
+      }
       if (!lid) throw Error('감은 눈 자리가 피부가 아니라서 버렸어요');
-      made.push(lid); lid.plan = plan; lid.result = bctx.getImageData(0, 0, crop.w, crop.h).data;
+      made.push(lid); lid.plan = plan; lid.result = result;
     } catch (e) { if (e.name === 'AbortError') throw e; errors.push(`eyelid_${side}: ${e.message}`); }
   }));
   for (const lid of made) {
