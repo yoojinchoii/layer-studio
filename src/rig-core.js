@@ -81,7 +81,8 @@ export function inferRig(layers,width,height){
     if(/^prop_[rl]$/.test(n))return n.endsWith('_r')?'wrist_left':'wrist_right';if(isHeadAccessory(n))return 'head';if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'arm_left':'arm_right';if(/topwear|상의/.test(n))return 'chest';if(isArmPart(n))return `arm_${namedSide(n)||(center(l)<cx?'left':'right')}`;if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
   const modes=layers.map((l,i)=>{const n=l.name.toLowerCase(),lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'leg':'foot'}_${lower[2]==='r'?'left':'right'}`;if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'sleeve_left':'sleeve_right';if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';if(/bottomwear|하의|skirt|치마/.test(n))return 'bottoms';if(/topwear|상의/.test(n)&&assignments[i]==='chest')return 'torso';if(/^(neck|목)$/.test(n))return 'neck';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
   layers.forEach((l,i)=>{const roots=mergedArmRoots(l,layers);if(!roots)return;assignments[i]='chest';modes[i]='crossed_arms';points.arm_left=roots.left;points.arm_right=roots.right;});
-  const rig={points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,garments:2,limbStyle:'mesh',weightBlend:{},partBones:{},meshDensity:'balanced',ik:true};restoreArmChains(rig,layers,{refit:true});return rig;
+  const holding=layers.filter(l=>/^prop_[rl]$/i.test(l.name)).map(l=>/_r$/i.test(l.name)?'left':'right');
+  const rig={holding,points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,garments:2,limbStyle:'mesh',weightBlend:{},partBones:{},meshDensity:'balanced',ik:true};restoreArmChains(rig,layers,{refit:true});return rig;
 }
 // Pixel statistics for opaque pixels of a layer, in image coordinates (pixel centres).
 function opaquePoints(layer,keep=()=>true,stride=1){
@@ -498,11 +499,14 @@ function templateAnimations(rig,ikNames,amplitude){
   const restWorld=setupPose(rig).world,wrap=a=>((a+540)%360)-180;
   const reach=(side,upper,fore)=>{const o=side==='right'?1:-1,mirror=a=>side==='right'?a:180-a,arm=restWorld[`arm_${side}`],el=restWorld[`elbow_${side}`];
     if(!arm||!el)return {arm:o*upper,elbow:0};const a=wrap(mirror(upper)-arm.angle);return {arm:a,elbow:wrap(mirror(fore)-el.angle-a)};};
-  const waveArm=reach('right',15,85);
+  // 손 흔들기는 빈손으로: 물건(삼지창·맥주잔)을 든 손으로 흔들면 물건이 머리 뒤로 휘둘린다.
+  const {side:ws,mode:wm}=waveSide(rig),wo=ws==='right'?1:-1,other=ws==='right'?'left':'right',frameAngle=id=>{const a=restWorld[id]?.angle??0;return ws==='right'?a:180-a;};
+  // 건배: 지금 팔 자세에서 위팔 15°, 아래팔 35° 더 들어 올리고 박자에 맞춰 조금 흔든다. 손목은 반대로 돌려 든 물건이 거의 서 있게.
+  const waveArm=wm==='toast'?reach(ws,frameAngle(`arm_${ws}`)+15,frameAngle(`elbow_${ws}`)+50):reach(ws,15,85),swing=wm==='toast'?.35:1;
   // Template motions stay small: a starting point the animator exaggerates, not a finished take.
   out.wave=make(1.6,{chest:{rotate:p=>sin(p)*.8},head:{rotate:p=>sin(p,1,.25)*1.5},hair:{rotate:p=>-sin(p,1,.1)*1.2},
     // 손 흔들기: 위팔을 어깨 높이 위로(75°), 아래팔은 위로 세우고(팔꿈치 70°) 팔꿈치에서 좌우로 두 번 흔든다. 손목은 반 박자 늦게.
-    arm_right:{rotate:p=>(waveArm.arm+sin(p)*3)*A},elbow_right:{rotate:p=>(waveArm.elbow+sin(p,2)*22)*A},wrist_right:{rotate:p=>sin(p,2,-.12)*12*A},arm_left:{rotate:p=>sin(p)*1}});
+    [`arm_${ws}`]:{rotate:p=>(waveArm.arm*(wm==='toast'?(1-Math.cos(p*2*Math.PI))/2:1)+wo*sin(p)*3*swing)*A},[`elbow_${ws}`]:{rotate:p=>(waveArm.elbow*(wm==='toast'?(1-Math.cos(p*2*Math.PI))/2:1)+wo*sin(p,2)*22*swing)*A},[`wrist_${ws}`]:{rotate:p=>(wm==='toast'?-(waveArm.arm+waveArm.elbow)*.85*(1-Math.cos(p*2*Math.PI))/2:0)+wo*sin(p,2,-.12)*12*swing*A},[`arm_${other}`]:{rotate:p=>sin(p)*1}});
   energy=1.3;out.cheer=make(1.2,{body:{translate:p=>[0,(1-Math.cos(p*4*Math.PI))*1.5*s]},head:{rotate:p=>sin(p)*2},hair:{rotate:p=>-sin(p,2,.1)*1.5},
     // 환호: 두 팔을 머리 위로(위팔 100°) 들고 박자에 맞춰 조금씩 흔든다
     ...each((side,o)=>{const r=reach(side,40,55);return {[`arm_${side}`]:{rotate:p=>(r.arm+o*sin(p,2)*8)*A},[`elbow_${side}`]:{rotate:p=>(r.elbow+o*sin(p,2,.08)*8)*A}};})});
@@ -534,6 +538,13 @@ export function faceTurnMixes(rig,active=new Set(activeIds(rig))){
   for(const id of ['face_hair_front','face_hair_back'])if(!String(rig.parents[id]||'').startsWith('face_'))delete totals[id];
   return Object.entries(totals).filter(([id])=>active.has(id)).map(([id,total])=>[id,Math.round((total-inh(id))*100)/100]).filter(([,mix])=>Math.abs(mix)>=.01);
 }
+// 손 흔들 팔: 물건을 든 손·허리에 얹은 손은 피한다(화면 오른쪽 팔 기본). 둘 다 바쁘면 물건 든 손을 살짝 드는 건배.
+export function akimbo(rig,side){const P=rig.points,s=P[`arm_${side}`],e=P[`elbow_${side}`],w=P[`wrist_${side}`];if(!s||!e||!w)return false;
+  const L=Math.hypot(e.x-s.x,e.y-s.y)||1;return Math.abs(e.x-s.x)>Math.abs(w.x-s.x)+L*.25&&w.y>s.y+L*.6;}
+export function waveSide(rig){const h=rig.holding||[],can=side=>availableChain(rig,`arm_${side}`),free=side=>can(side)&&!h.includes(side)&&!akimbo(rig,side);
+  if(free('right'))return {side:'right',mode:'wave'};if(free('left'))return {side:'left',mode:'wave'};
+  const held=['right','left'].find(side=>can(side)&&h.includes(side));if(held)return {side:held,mode:'toast'};
+  return {side:can('right')||!can('left')?'right':'left',mode:'wave'};}
 export function makeSkeleton(parts,rig,amplitude=1){
   const P=rig.points,root=P.root,setup=setupPose(rig),world=setup.world,active=new Set(activeIds(rig)),order=setup.order.filter(id=>active.has(id));setup.order=order;
   const bones=order.map(id=>{if(id==='root')return {name:'root'};const parent=rig.parents[id],[x,y]=toLocal(world,parent,world[id].x,world[id].y);

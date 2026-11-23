@@ -69,7 +69,7 @@ export function faceCropBox(labels, w, h, faceId = 2) {
 
 /**
  * 얼굴 지도로 전신 부위 지도를 고친다(얼굴 상자 안). 머리카락·얼굴 경계만 다시 정한다:
- * 피부·이목구비 → 얼굴(전신 지도가 머리카락·얼굴·기타·빈칸이던 자리만), 머리카락 → 머리카락(얼굴이던 자리만).
+ * 피부·이목구비 → 얼굴(전신 지도가 머리카락·얼굴·빈칸이던 자리만), 머리카락 → 머리카락(얼굴이던 자리만).
  * 목·옷·머리띠 같은 다른 부위는 건드리지 않는다(얼굴 지도는 머리띠도 머리카락으로 칠하곤 한다).
  */
 export function mergeFaceMap(labels, face, { hairId = 1, faceId = 2, otherId = 10 } = {}) {
@@ -80,7 +80,8 @@ export function mergeFaceMap(labels, face, { hairId = 1, faceId = 2, otherId = 1
     if (!k) continue;
     let to = was;
     if (k === FACE_ID.hair) { if (was === faceId || was === hairId) to = hairId; }
-    else if (was === hairId || was === faceId || was === otherId || was === 0) to = faceId;
+    // 전신 지도의 '기타'(손에 든 물건·머리띠)는 얼굴로 바꾸지 않는다: 얼굴 상자 안에 들어온 삼지창 끝이 얼굴이 된다.
+    else if (was === hairId || was === faceId || was === 0) to = faceId;
     // 고친 자리는 고정(pin): 색 영역 다수결이 얼굴 지도를 다시 덮지 않게(페인팅풍은 피부·금발이 한 색 영역으로 묶이곤 한다)
     if (to === faceId || to === hairId) pin[i] = to;
     if (to !== was) { out[i] = to; changed++; }

@@ -22,11 +22,11 @@ test('crop box surrounds the largest face blob with room for the hair around it'
 
 test('merge fixes only the hair/face boundary and pins what it decided', () => {
   // 전신 지도: 머리카락(1)으로 칠한 눈, 얼굴(2), 목(3), 기타(10)
-  const labels = Uint8Array.from([1, 2, 3, 10, 2, 0]);
-  const face = Uint8Array.from([FACE_ID.iris, FACE_ID.hair, FACE_ID.skin, FACE_ID.hair, 0, FACE_ID.lash]);
+  const labels = Uint8Array.from([1, 2, 3, 10, 2, 0, 10]);
+  const face = Uint8Array.from([FACE_ID.iris, FACE_ID.hair, FACE_ID.skin, FACE_ID.hair, 0, FACE_ID.lash, FACE_ID.skin]);
   const { labels: out, pin } = mergeFaceMap(labels, face);
-  assert.deepEqual([...out], [2, 1, 3, 10, 2, 2]);
-  assert.deepEqual([...pin], [2, 1, 0, 0, 0, 2]);
+  assert.deepEqual([...out], [2, 1, 3, 10, 2, 2, 10]);
+  assert.deepEqual([...pin], [2, 1, 0, 0, 0, 2, 0]);
 });
 
 test('eyes, brows, mouth and nose come from the map inside the face; ear shading is not taken as the nose', () => {

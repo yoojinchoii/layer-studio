@@ -302,7 +302,18 @@ export function faceDetailsFromMap(data, w, h, faceMask, ai) {
   if (!fb || area < 400 || !ai) return null;
   const cls = (...ids) => { const m = new Uint8Array(w * h); for (let i = 0; i < m.length; i++) if (faceMask[i] && ids.includes(ai[i])) m[i] = 1; return m; };
   const [WHITE, IRIS, LASH, BROW, MOUTH, NOSE] = [4, 5, 6, 3, 7, 8];
-  const eyeAny = cls(WHITE, IRIS, LASH), grouped = components(and(dilate(eyeAny, w, h, 1.5), faceMask), w, h);
+  // 지도는 원화와 1~3px 어긋난다(눈이 작은 그림에서는 크다). 지도가 가리킨 자리 둘레에서 실제로 피부색과 다른 픽셀만 고른다.
+  const skinMask = cls(1), skin = count(skinMask) > 50 ? dominantColor(data, skinMask) : dominantColor(data, faceMask);
+  const snap = (m, r, T, keepWhite = false) => {
+    const near = and(dilate(m, w, h, r), faceMask), out = new Uint8Array(w * h);
+    for (let i = 0; i < out.length; i++) if (near[i] && (rgbDist(data, i, skin) > T || (keepWhite && lum(data, i) > 170))) out[i] = 1;
+    // 지도 덩어리에 닿은 조각만(둘레의 다른 선·음영은 버림)
+    const c = components(out, w, h), keep = new Set();
+    for (let i = 0; i < out.length; i++) if (out[i] && m[i]) keep.add(c.label[i]);
+    for (let i = 0; i < out.length; i++) if (out[i] && !keep.has(c.label[i])) out[i] = 0;
+    return out;
+  };
+  const eyeAny = or(snap(cls(WHITE, IRIS, LASH), 1, 45, true), cls(WHITE, IRIS)), grouped = components(and(dilate(eyeAny, w, h, 1.5), faceMask), w, h);
   const eyes = grouped.list.filter((c) => c.area >= area * 0.002).sort((a, b) => b.area - a.area).slice(0, 2);
   if (!eyes.length) return null;
   const notes = [], details = {}, cx = fb.x + fb.width / 2;
@@ -318,16 +329,20 @@ export function faceDetailsFromMap(data, w, h, faceMask, ai) {
     const irisColor = count(irides) >= 4 ? dominantColor(data, irides) : null;
     // 흰자로 칠해진 자리라도 어둡거나 채도가 높은 픽셀(속눈썹·눈동자 테두리 선)은 흰자에서 뺀다:
     // 흰자 레이어에 선이 남으면 눈동자가 움직일 때 그 선이 구멍 사이로 어긋나 보인다.
+    // 밝기 기준은 그림마다 다르다(페인팅풍 흰자는 그늘져 회색): 지도가 흰자라 한 픽셀 밝기의 85% 지점의 72%.
+    const whiteLums = []; for (let i = 0; i < eye.length; i++) if (eyewhite[i]) whiteLums.push(lum(data, i));
+    whiteLums.sort((a, b) => a - b);
+    const minLum = whiteLums.length ? whiteLums[Math.floor(whiteLums.length * 0.85)] * 0.72 : 150;
     for (let i = 0; i < eye.length; i++) {
       if (!eyewhite[i]) continue;
       const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
-      if (lum(data, i) < 150 || Math.max(r, g, b) - Math.min(r, g, b) > 70) eyewhite[i] = 0;
+      if (lum(data, i) < minLum || Math.max(r, g, b) - Math.min(r, g, b) > 80) eyewhite[i] = 0;
     }
     for (let i = 0; i < eye.length; i++) {
       if (!eye[i] || irides[i] || eyewhite[i]) continue;
       const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
       if (irisColor && rgbDist(data, i, irisColor) < 60 && lum(data, i) > 55) irides[i] = 1;
-      else if (lum(data, i) > 190 && Math.max(r, g, b) - Math.min(r, g, b) < 50) eyewhite[i] = 1;
+      else if (lum(data, i) > Math.max(minLum, 120) && Math.max(r, g, b) - Math.min(r, g, b) < 50) eyewhite[i] = 1;
     }
     details[`eyelash_${side}`] = minus(eye, or(irides, eyewhite));
     details[`irides_${side}`] = irides;
@@ -337,16 +352,17 @@ export function faceDetailsFromMap(data, w, h, faceMask, ai) {
   }
   // 눈썹·입·코: 지도 덩어리(작은 점은 버림). 눈썹은 가까운 눈 쪽으로.
   const pieces = (m, min) => { const c = components(m, w, h); return c.list.filter((q) => q.area >= min).map((q) => { const o = new Uint8Array(w * h); for (let i = 0; i < o.length; i++) if (c.label[i] === q.id) o[i] = 1; return { ...q, mask: o }; }); };
-  for (const b of pieces(cls(BROW), area * 0.001)) {
+  const browMask = minus(snap(cls(BROW), 2, 55), dilate(eyeAny, w, h, 1));
+  for (const b of pieces(browMask, area * 0.001)) {
     const near = eyes.slice().sort((a, b2) => Math.abs(a.cx - b.cx) - Math.abs(b2.cx - b.cx))[0], side = sideOf(near);
     details[`eyebrow_${side}`] = or(details[`eyebrow_${side}`] || new Uint8Array(w * h), b.mask);
   }
-  const mouth = pieces(cls(MOUTH), area * 0.001);
+  const mouth = pieces(or(snap(cls(MOUTH), 1, 45, true), cls(MOUTH)), area * 0.001);
   if (mouth.length) details.mouth = mouth.reduce((m, q) => or(m, q.mask), new Uint8Array(w * h));
   // 코: 두 눈 사이 가로 범위 안, 눈 아래~입 위 조각만(귀 그림자·볼 음영이 코색으로 칠해지곤 한다)
-  const eyeX0 = Math.min(...eyes.map((e) => e.x)), eyeX1 = Math.max(...eyes.map((e) => e.x + e.width)), eyeY = Math.max(...eyes.map((e) => e.cy));
+  const eyeX0 = eyes.length === 2 ? Math.min(eyes[0].cx, eyes[1].cx) - fb.width * 0.05 : cx - fb.width * 0.15, eyeX1 = eyes.length === 2 ? Math.max(eyes[0].cx, eyes[1].cx) + fb.width * 0.05 : cx + fb.width * 0.15, eyeY = Math.max(...eyes.map((e) => e.cy));
   const mouthTop = mouth.length ? Math.min(...mouth.map((q) => q.y)) : fb.y + fb.height;
-  const nose = pieces(cls(NOSE), area * 0.0003).filter((q) => q.cx > eyeX0 - fb.width * 0.05 && q.cx < eyeX1 + fb.width * 0.05 && q.cy > eyeY && q.cy < mouthTop + 2);
+  const nose = pieces(cls(NOSE), area * 0.0003).filter((q) => q.cx > eyeX0 && q.cx < eyeX1 && q.cy > eyeY && q.cy < mouthTop + 2);
   if (nose.length) details.nose = nose.reduce((m, q) => or(m, q.mask), new Uint8Array(w * h));
   if (eyes.length < 2) notes.push('얼굴 지도에서 눈을 하나만 찾았습니다.');
   return { details, skin: dominantColor(data, faceMask), notes };

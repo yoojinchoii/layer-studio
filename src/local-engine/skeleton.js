@@ -553,6 +553,9 @@ export function applyAiJoints(rig, ai) {
     }
   }
   const legs = ['left', 'right'].every((side) => ['hip', 'knee', 'ankle'].every((k) => ok(ai[`${k}_${side}`])));
+  // flare가 양다리 관절을 모두 찾았으면(발목이 엉덩이보다 아래) 전신이다: 2~3등신(머리가 큰) 캐릭터는 골격 분석이 전신이 아니라고 보곤 한다.
+  const legsDown = legs && ['left', 'right'].every((side) => ai[`ankle_${side}`].y > ai[`knee_${side}`].y && ai[`knee_${side}`].y > ai[`hip_${side}`].y);
+  if (legsDown && rig.frame !== 'full') rig.frame = 'full';
   if (legs && rig.frame === 'full') {
     for (const side of ['left', 'right']) for (const k of ['hip', 'knee', 'ankle']) P[`${k}_${side}`] = { ...ai[`${k}_${side}`] };
     const hx = (P.hip_left.x + P.hip_right.x) / 2, hy = (P.hip_left.y + P.hip_right.y) / 2, n = P.neck;

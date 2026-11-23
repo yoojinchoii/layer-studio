@@ -57,6 +57,17 @@ function sideOf(key, x, rig) {
   return x < mid ? 'r' : 'l';
 }
 
+// flare 관절이 있으면 팔·다리 픽셀을 더 가까운 쪽 뼈(어깨–팔꿈치–손목, 엉덩이–무릎–발목)로 보낸다:
+// 가운데 세로선으로 나누면 꼰 다리·몸 앞으로 온 팔이 반대쪽으로 간다.
+function sideByChain(key, x, y, rig) {
+  const P = rig.points, legs = key === 'legwear' || key === 'footwear';
+  const ids = legs ? ['hip', 'knee', 'ankle'] : ['arm', 'elbow', 'wrist'];
+  const dist = (side) => { const pts = ids.map((j) => P[`${j}_${side}`]).filter(Boolean); if (pts.length < 2) return Infinity;
+    let best = Infinity; for (let k = 0; k < pts.length - 1; k++) { const a = pts[k], b = pts[k + 1], dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy || 1, t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / L)); best = Math.min(best, Math.hypot(x - a.x - t * dx, y - a.y - t * dy)); } return best; };
+  const l = dist('left'), r = dist('right');
+  return l === Infinity && r === Infinity ? null : l <= r ? 'r' : 'l';
+}
+
 /**
  * assignParts 결과를 AI 지도로 고친다. 원래 결과 객체 형식({partLabels, parts, ...})을 그대로 돌려준다.
  * @param {{width:number,height:number,labels:Int32Array,regions:Array,fg:Uint8Array}} seg
@@ -90,7 +101,7 @@ export function applyAiLabels(seg, rig, partsResult, ai, { regionShare = 0.88, p
   // flare 지도가 눈·입을 목이나 옷 색으로 칠하면 눈이 목 레이어로 빠지고 얼굴엔 구멍이 남는다.
   const chinY = rig.points?.head?.y ?? -1;
   const keyOf = (id) => AI_CLASSES[id - 1]?.key;
-  const names = new Array(n);
+  const names = new Array(n), noneOld = new Array(n);
   let changed = 0;
   for (let i = 0; i < n; i++) {
     if (!fg[i]) continue;
@@ -99,12 +110,18 @@ export function applyAiLabels(seg, rig, partsResult, ai, { regionShare = 0.88, p
     const key = keyOf(k);
     let name = old;
     // 팔짱(handwear)은 알고리즘 판단을 지킨다: 좌우로 쪼개면 가슴 고정 리깅이 깨진다.
-    const faceGuard = old === 'face' && (i - (i % w)) / w < chinY && key !== 'hair' && key !== 'face';
+    // 얼굴 세부 지도(pin)가 있으면 그 지도가 얼굴이라 한 픽셀만 지킨다(얼굴 상자에 들어온 삼지창 끝은 물건으로 보낸다).
+    const faceGuard = old === 'face' && (i - (i % w)) / w < chinY && key !== 'hair' && key !== 'face' && (!pin || pin[i] === 2);
+    // 지도가 판단하지 못한 픽셀(경계의 섞인 색)·'기타'는 아래에서 지도 기준으로 다시 정한다(알고리즘 추측은 마지막 수단).
+    if (!key && old !== 'handwear' && !faceGuard) { names[i] = '__none'; noneOld[i] = old; continue; }
+    if (key === 'other' && old !== 'handwear' && !faceGuard) { names[i] = '__other'; noneOld[i] = old; continue; }
     if (key && key !== 'other' && old !== 'handwear' && !faceGuard) {
       if (key === 'hair' || key === 'face' || key === 'neck' || key === 'topwear' || key === 'bottomwear') name = key;
       else if (SIDED.has(key)) {
-        const oldSide = old && old.startsWith(key + '_') ? old.slice(-1) : null;
-        name = `${key}_${oldSide || sideOf(key, i % w, rig)}`;
+        const legs = key === 'legwear' || key === 'footwear', joints = rig.aiJoints || [];
+        const trusted = legs ? joints.includes('legs') : joints.includes('arm_left') && joints.includes('arm_right');
+        const oldSide = !trusted && old && old.startsWith(key + '_') ? old.slice(-1) : null;
+        name = `${key}_${oldSide || (trusted && sideByChain(key, i % w, (i - (i % w)) / w, rig)) || sideOf(key, i % w, rig)}`;
       }
     }
     if (name !== old) changed++;
@@ -116,7 +133,7 @@ export function applyAiLabels(seg, rig, partsResult, ai, { regionShare = 0.88, p
   const hands = ['left', 'right'].flatMap((side) => [P[`wrist_${side}`], ends[`hand_tip_${side}`]].filter(Boolean).map((p) => ({ side, p })));
   if (hands.length) {
     const other = new Uint8Array(n);
-    for (let i = 0; i < n; i++) if (fg[i] && keyOf(regionClass[labels[i]] || ai[i]) === 'other') other[i] = 1;
+    for (let i = 0; i < n; i++) if (names[i] === '__other') other[i] = 1;
     const seen = new Uint8Array(n), reach = Math.max(12, h * 0.06);
     for (let i0 = 0; i0 < n; i0++) {
       if (!other[i0] || seen[i0]) continue;
@@ -128,9 +145,61 @@ export function applyAiLabels(seg, rig, partsResult, ai, { regionShare = 0.88, p
       let best = null;
       for (const hnd of hands) { let d = Infinity; for (let k = 0; k < comp.length; k += 3) { const x = comp[k] % w, y = (comp[k] - x) / w; d = Math.min(d, Math.hypot(x - hnd.p.x, y - hnd.p.y)); } if (!best || d < best.d) best = { d, side: hnd.side }; }
       if (!best || best.d > reach) continue;
+      // 둘레 대부분이 옷(상의·하의)에 붙은 덩어리는 손에 든 물건이 아니라 옷 장식(허리에 손을 얹은 앞치마 띠 등)
+      let edge = 0, cloth = 0;
+      for (const i of comp) { const x = i % w, y = (i - x) / w;
+        for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) {
+          if (j < 0 || other[j]) continue; edge++; if (fg[j] && /^(topwear|bottomwear)$/.test(names[j] || '')) cloth++; } }
+      if (edge && cloth / edge > 0.5) continue;
       const name = `prop_${best.side === 'left' ? 'r' : 'l'}`;
       for (const i of comp) { if (names[i] !== name) changed++; names[i] = name; }
     }
+  }
+  // 손에 가려 둘로 나뉜 물건(삼지창 자루 위·아래 등): 손에 든 물건 가까이(손 닿는 거리)의 '기타' 덩어리는 같은 물건으로 묶는다.
+  {
+    // 손 하나 크기(키의 12%)까지: 손에 가려 끊긴 자루를 건너 이어 준다
+    const reach = Math.max(24, h * 0.12), dist = new Float32Array(n).fill(Infinity), owner = new Array(n), q = [];
+    for (let i = 0; i < n; i++) if (/^prop_[rl]$/.test(names[i] || '')) { dist[i] = 0; owner[i] = names[i]; q.push(i); }
+    for (let k = 0; k < q.length; k++) { const i = q[k], x = i % w, y = (i - x) / w; if (dist[i] >= reach) continue;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) if (j >= 0 && dist[j] === Infinity) { dist[j] = dist[i] + 1; owner[j] = owner[i]; q.push(j); } }
+    const seen = new Uint8Array(n);
+    for (let i0 = 0; i0 < n; i0++) {
+      if (names[i0] !== '__other' || seen[i0]) continue;
+      const comp = [i0]; seen[i0] = 1; let near = null;
+      for (let c = 0; c < comp.length; c++) { const i = comp[c], x = i % w, y = (i - x) / w; if (!near && dist[i] <= reach) near = owner[i];
+        for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) if (j >= 0 && names[j] === '__other' && !seen[j]) { seen[j] = 1; comp.push(j); } }
+      if (!near) continue;
+      let edge = 0, cloth = 0;
+      for (const i of comp) { const x = i % w, y = (i - x) / w;
+        for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) {
+          if (j < 0 || names[j] === '__other') continue; edge++; if (fg[j] && /^(topwear|bottomwear)$/.test(names[j] || '')) cloth++; } }
+      if (edge && cloth / edge > 0.5) continue; // 옷에 붙은 장식(앞치마 띠)은 물건이 아니다
+      for (const i of comp) { names[i] = near; changed++; }
+    }
+  }
+  // 손에 들지 않은 '기타'(앞치마·띠·머리띠 등)는 둘레에서 가장 많이 맞닿은 부위를 따른다(앞치마 → 치마, 머리띠 → 머리카락).
+  {
+    const seen = new Uint8Array(n);
+    for (let i0 = 0; i0 < n; i0++) {
+      if (names[i0] !== '__other' || seen[i0]) continue;
+      const comp = [i0]; seen[i0] = 1; const touch = new Map();
+      for (let q = 0; q < comp.length; q++) { const i = comp[q], x = i % w, y = (i - x) / w;
+        for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) {
+          if (j < 0 || !fg[j]) continue;
+          if (names[j] === '__other') { if (!seen[j]) { seen[j] = 1; comp.push(j); } }
+          else if (names[j] && !names[j].startsWith('__')) touch.set(names[j], (touch.get(names[j]) || 0) + 1);
+        } }
+      const best = [...touch].sort((a, b) => b[1] - a[1])[0]?.[0];
+      for (const i of comp) { const name = best || noneOld[i]; if (name !== noneOld[i]) changed++; names[i] = name; }
+    }
+  }
+  // 지도가 못 정한 픽셀: 가장 가까운 정해진 픽셀을 따른다(너비 우선). 닿는 곳이 없으면 알고리즘 추측.
+  {
+    const q = [];
+    for (let i = 0; i < n; i++) if (names[i] && !names[i].startsWith('__')) q.push(i);
+    for (let k = 0; k < q.length; k++) { const i = q[k], x = i % w, y = (i - x) / w;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1]) if (j >= 0 && names[j] === '__none') { names[j] = names[i]; if (names[j] !== noneOld[j]) changed++; q.push(j); } }
+    for (let i = 0; i < n; i++) if (names[i] === '__none' || names[i] === '__other') names[i] = noneOld[i];
   }
   const order = Object.keys(PART_LABELS);
   const used = [...new Set(names.filter(Boolean))].sort((a, b) => (order.indexOf(a) + 1 || 99) - (order.indexOf(b) + 1 || 99));

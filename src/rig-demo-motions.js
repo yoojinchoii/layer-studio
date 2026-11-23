@@ -12,7 +12,7 @@ export const animationDescriptions={
 };
 export function availableAnimations(rig){
   const ids=new Set(activeIds(rig)),has=id=>ids.has(id),upper=rig.frame!=='bust',arms=['left','right'].some(s=>has(`arm_${s}`)&&independentArm(rig,s));
-  const enabled={head_sway:has('head'),face_turn:has('face_turn')&&['face_mouth','face_eye_left','face_eye_right'].some(has),face_gaze:['left','right'].some(s=>has(`face_pupil_${s}`)),face_expression:[...ids].some(id=>/^face_(brow|lid_|mouth)/.test(id)),upper_sway:upper&&has('chest'),upper_gesture:upper&&arms,idle:true,wave:upper&&availableChain(rig,'arm_right'),cheer:upper&&arms,hop:upper&&availableChain(rig,'leg_left')&&availableChain(rig,'leg_right')};
+  const enabled={head_sway:has('head'),face_turn:has('face_turn')&&['face_mouth','face_eye_left','face_eye_right'].some(has),face_gaze:['left','right'].some(s=>has(`face_pupil_${s}`)),face_expression:[...ids].some(id=>/^face_(brow|lid_|mouth)/.test(id)),upper_sway:upper&&has('chest'),upper_gesture:upper&&arms,idle:true,wave:upper&&(availableChain(rig,'arm_right')||availableChain(rig,'arm_left')),cheer:upper&&arms,hop:upper&&availableChain(rig,'leg_left')&&availableChain(rig,'leg_right')};
   return Object.keys(animationNames).filter(key=>enabled[key]);
 }
 
