@@ -447,7 +447,7 @@ const ORDER = [
   'front_hair', 'eyebrow_r', 'eyebrow_l', 'eyelash_r', 'eyelash_l', 'eyelash_lower_r', 'eyelash_lower_l',
   'mouth', 'nose', 'face', 'irides_r', 'irides_l', 'eyewhite_r', 'eyewhite_l',
   'handwear', 'sleeve_r', 'sleeve_l', 'arm_r', 'arm_l', 'prop_r', 'prop_l', 'topwear', 'bottomwear', 'neck',
-  'footwear_r', 'footwear_l', 'legwear_r', 'legwear_l', 'back_hair',
+  'footwear_r', 'footwear_l', 'legwear_r', 'legwear_l', 'tail', 'back_hair',
 ];
 
 /**

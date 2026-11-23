@@ -16,6 +16,7 @@ export const AI_CLASSES = [
   { id: 8, key: 'legwear', color: [128, 0, 255], prompt: 'legs, tights and socks' },
   { id: 9, key: 'footwear', color: [0, 128, 128], prompt: 'shoes and boots' },
   { id: 10, key: 'other', color: [128, 128, 128], prompt: 'hats, bags, weapons, held items and other accessories' },
+  { id: 11, key: 'tail', color: [128, 64, 0], prompt: 'tails (animal, devil or monster tails)' },
 ];
 const SIDED = new Set(['sleeve', 'arm', 'legwear', 'footwear']);
 const hex = (c) => '#' + c.map((v) => v.toString(16).padStart(2, '0')).join('').toUpperCase();
@@ -116,7 +117,7 @@ export function applyAiLabels(seg, rig, partsResult, ai, { regionShare = 0.88, p
     if (!key && old !== 'handwear' && !faceGuard) { names[i] = '__none'; noneOld[i] = old; continue; }
     if (key === 'other' && old !== 'handwear' && !faceGuard) { names[i] = '__other'; noneOld[i] = old; continue; }
     if (key && key !== 'other' && old !== 'handwear' && !faceGuard) {
-      if (key === 'hair' || key === 'face' || key === 'neck' || key === 'topwear' || key === 'bottomwear') name = key;
+      if (key === 'hair' || key === 'face' || key === 'neck' || key === 'topwear' || key === 'bottomwear' || key === 'tail') name = key;
       else if (SIDED.has(key)) {
         const legs = key === 'legwear' || key === 'footwear', joints = rig.aiJoints || [];
         const trusted = legs ? joints.includes('legs') : joints.includes('arm_left') && joints.includes('arm_right');

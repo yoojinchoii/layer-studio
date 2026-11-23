@@ -1,6 +1,7 @@
 import {restoreArmChains} from './arm-separation.js';
 import {addHairChains} from './hair-chains.js';
 import {addSkirtChains} from './skirt-chains.js';
+import {addTailChain} from './tail-chain.js';
 import {configureFace,extendHalfFace} from './face-rig.js';
 import {inferRig,refineRig,boneOrder,boneLabels} from './rig-core.js';
 import {activeIds,chainDefs,availableChain,validateControls} from './rig-scope.js';
@@ -38,7 +39,7 @@ export function applyBuiltin(kind,layers,width,height){
   const rig=inferRig(layers,width,height);fitPartial(rig,layers,kind);refineRig(rig,layers);
   if(kind==='bust')fitPartial(rig,layers,kind);
   rig.frame=kind;rig.activeBones=scopedBones(rig,layers,kind);if(kind==='bust')configureFace(rig,layers);rig.pose={};rig.ikModes=Object.fromEntries(Object.keys(chainDefs).filter(key=>availableChain(rig,key)).map(key=>[key,'fk']));rig.ikTargets={};rig.ikBends={};
-  extendHalfFace(rig,layers);addHairChains(rig,layers);addSkirtChains(rig,layers);restoreArmChains(rig,layers);
+  extendHalfFace(rig,layers);addHairChains(rig,layers);addSkirtChains(rig,layers);addTailChain(rig,layers);restoreArmChains(rig,layers);
   // No remote AI or old mesh transfer: every derived mesh uses the destination pixels.
   return {rig,matched:layers.length,unmatched:[]};
 }
@@ -63,7 +64,7 @@ export function validateTemplate(t){
   const record=v=>v&&typeof v==='object'&&!Array.isArray(v),num=v=>Number.isFinite(v)&&Math.abs(v)<=100;
   if(!record(t)||t.format!=='layer-studio-template-v1'||typeof t.name!=='string'||!t.name.trim()||t.name.length>80||!templateKinds[t.frame]||!record(t.joints)||!Array.isArray(t.rules)||t.rules.length>100)throw Error('올바른 리깅 템플릿 파일이 아닙니다.');
   const ids=Object.keys(t.joints);if(ids.length>64||!ids.includes('root')||!ids.includes('body'))throw Error('템플릿의 기본 뼈대를 확인해주세요.');
-  const known=id=>Object.hasOwn(boneLabels,id)||/^joint_\d+$/.test(id)||/^hair_(front|back)_(left|right)_\d$/.test(id)||/^skirt_(left|right)_\d$/.test(id);
+  const known=id=>Object.hasOwn(boneLabels,id)||/^joint_\d+$/.test(id)||/^hair_(front|back)_(left|right)_\d$/.test(id)||/^skirt_(left|right)_\d$/.test(id)||/^tail_\d$/.test(id);
   const anchor=a=>a===null||record(a)&&typeof a.name==='string'&&a.name.length<=200&&typeof a.role==='string'&&a.role.length<=100&&Number.isInteger(a.ordinal)&&a.ordinal>=0&&a.ordinal<100;
   for(const [id,p]of Object.entries(t.joints))if(!known(id)||!record(p)||![p.x,p.y,p.gx,p.gy].every(num)||typeof p.label!=='string'||p.label.length>80||!anchor(p.anchor)||(id==='root'?p.parent!==null:!ids.includes(p.parent)))throw Error('템플릿 관절 정보가 올바르지 않습니다.');
   boneOrder({points:t.joints,parents:Object.fromEntries(ids.filter(id=>id!=='root').map(id=>[id,t.joints[id].parent]))});

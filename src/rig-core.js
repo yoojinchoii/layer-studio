@@ -4,6 +4,7 @@ import {faceLabels,faceCandidates,faceWeights,splitFaceLids,facialOffsets} from 
 import {activeIds,activeBone,chainDefs,availableChain,independentArm} from './rig-scope.js';
 import {hairSwaySpec} from './hair-chains.js';
 import {skirtWeights,skirtChainIds,skirtSwaySpec} from './skirt-chains.js';
+import {isTailLayer,tailParent,tailWeights,tailChainIds,tailMeshPoints,tailSwaySpec} from './tail-chain.js';
 import {separateSleeve} from './garment-parts.js';
 import {silhouetteTopology} from './mesh-topology.js';
 import {refinementPoints} from './weight-refine.js';
@@ -78,8 +79,8 @@ export function inferRig(layers,width,height){
   const assignments=layers.map(l=>{const n=l.name.toLowerCase(),part=n.match(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_([rl])(?:_\d+)?$/);
     if(part)return `${partBones[part[1]]}_${part[2]==='r'?'left':'right'}`;
     const lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'hip':'ankle'}_${lower[2]==='r'?'left':'right'}`;
-    if(/^prop_[rl]$/.test(n))return n.endsWith('_r')?'wrist_left':'wrist_right';if(isHeadAccessory(n))return 'head';if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'arm_left':'arm_right';if(/topwear|상의/.test(n))return 'chest';if(isArmPart(n))return `arm_${namedSide(n)||(center(l)<cx?'left':'right')}`;if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
-  const modes=layers.map((l,i)=>{const n=l.name.toLowerCase(),lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'leg':'foot'}_${lower[2]==='r'?'left':'right'}`;if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'sleeve_left':'sleeve_right';if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';if(/bottomwear|하의|skirt|치마/.test(n))return 'bottoms';if(/topwear|상의/.test(n)&&assignments[i]==='chest')return 'torso';if(/^(neck|목)$/.test(n))return 'neck';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
+    if(/^prop_[rl]$/.test(n))return n.endsWith('_r')?'wrist_left':'wrist_right';if(isTailLayer(n))return 'pelvis';if(isHeadAccessory(n))return 'head';if(/hair|머리카락/.test(n))return 'hair';if(/face|eye|irides|nose|mouth|ears|얼굴|눈|코|입|귀/.test(n))return 'head';if(/neck|목/.test(n))return 'neck';if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'arm_left':'arm_right';if(/topwear|상의/.test(n))return 'chest';if(isArmPart(n))return `arm_${namedSide(n)||(center(l)<cx?'left':'right')}`;if(/bottomwear|하의|skirt|치마/.test(n))return 'pelvis';return 'root';});
+  const modes=layers.map((l,i)=>{const n=l.name.toLowerCase(),lower=n.match(/^(legwear|footwear)_([rl])$/);if(lower)return `${lower[1]==='legwear'?'leg':'foot'}_${lower[2]==='r'?'left':'right'}`;if(/^sleeve_[rl]$/.test(n))return n.endsWith('_r')?'sleeve_left':'sleeve_right';if(isTailLayer(n))return 'tail';if(/^(upper_arm|forearm|hand|thigh|shin|foot|shoe)_[rl]/.test(n))return 'rigid';if(/bottomwear|하의|skirt|치마/.test(n))return 'bottoms';if(/topwear|상의/.test(n)&&assignments[i]==='chest')return 'torso';if(/^(neck|목)$/.test(n))return 'neck';return /handwear|^arm|팔/.test(n)?assignments[i]:/legwear|다리/.test(n)?'legs':/footwear|신발/.test(n)?'feet':'rigid';});
   layers.forEach((l,i)=>{const roots=mergedArmRoots(l,layers);if(!roots)return;assignments[i]='chest';modes[i]='crossed_arms';points.arm_left=roots.left;points.arm_right=roots.right;});
   const holding=layers.filter(l=>/^prop_[rl]$/i.test(l.name)).map(l=>/_r$/i.test(l.name)?'left':'right');
   const rig={holding,points,assignments,modes,parents:{...defaultParents},labels:{...boneLabels},pose:{},width,height,garments:2,limbStyle:'mesh',weightBlend:{},partBones:{},meshDensity:'balanced',ik:true};restoreArmChains(rig,layers,{refit:true});return rig;
@@ -135,6 +136,13 @@ export function addJoint(rig,label,parent){if(Object.keys(rig.points).length>=64
 export function deleteJoint(rig,id){if(boneLabels[id])throw Error('기본 관절은 삭제할 수 없어요.');const parent=rig.parents[id];for(const k in rig.parents)if(rig.parents[k]===id)rig.parents[k]=parent;rig.assignments=rig.assignments.map(x=>x===id?parent:x);if(rig.activeBones)rig.activeBones=rig.activeBones.filter(b=>b!==id);delete rig.points[id];delete rig.parents[id];delete rig.labels[id];delete rig.pose[id];if(rig.poseOffsets)delete rig.poseOffsets[id];if(rig.poseScales)delete rig.poseScales[id];if(rig.weightBlend)delete rig.weightBlend[id];if(rig.partBones)for(const k of Object.keys(rig.partBones)){rig.partBones[k]=rig.partBones[k].filter(b=>b!==id);if(!rig.partBones[k].length)delete rig.partBones[k];}}
 // Setup pose: every limb bone points at its next joint so Spine shows real bone lengths and IK can bend them.
 function nextJoint(id){const m=id.match(/^(arm|elbow|hip|knee)_(left|right)$/);if(m)return `${{arm:'elbow',elbow:'wrist',hip:'knee',knee:'ankle'}[m[1]]}_${m[2]}`;return {body:'chest',upper:'chest',chest:'neck',neck:'head'}[id];}
+// 체인(꼬리·치마·머리 가닥) 끝 마디는 자식이 없어 부모 방향을 따르곤 한다 → 저장해 둔 끝점을 향하게.
+function chainTip(rig,id){
+  if(rig.tailChain?.ids?.at(-1)===id)return rig.tailChain.tip;
+  for(const side of ['left','right'])if(rig.skirtChains?.[side]?.ids?.at(-1)===id)return rig.skirtChains[side].tip;
+  for(const chains of Object.values(rig.hairChains||{}))for(const c of chains)if(c.ids.at(-1)===id)return c.tip;
+  return null;
+}
 export function setupPose(rig){
   const P=rig.points,root=P.root,order=boneOrder(rig),world={},s=rig.height/768;
   const at=id=>({x:P[id].x-root.x,y:root.y-P[id].y});
@@ -143,7 +151,7 @@ export function setupPose(rig){
     const kids=order.filter(k=>rig.parents[k]===id),mapped=nextJoint(id),next=mapped&&rig.parents[mapped]===id?mapped:kids.length===1?kids[0]:null;
     const pos=at(id);let angle=0,length=0;
     if(id!=='root'){
-      const parent=world[rig.parents[id]],to=next&&P[next]?at(next):null,dir=to&&unit(to.x-pos.x,to.y-pos.y);
+      const tip=!next&&chainTip(rig,id),parent=world[rig.parents[id]],to=next&&P[next]?at(next):tip?{x:tip.x-root.x,y:root.y-tip.y}:null,dir=to&&unit(to.x-pos.x,to.y-pos.y);
       // 얼굴 뼈는 모두 수평 축(길이 0): 3D 돌리기 제약이 모든 얼굴 뼈를 같은 방향으로 옮기게.
       if(id.startsWith('face_')){angle=0;length=0;}
       else if(dir){angle=Math.atan2(dir.y,dir.x)/D2R;length=Math.hypot(to.x-pos.x,to.y-pos.y);}
@@ -321,11 +329,12 @@ function rawBoneCandidates(rig,index,mode=rig.modes[index],bone=rig.assignments[
   if(mode==='rigid'||mode==='crossed_arms')return [bone];if(mode==='split_arms')return ['left','right'].flatMap(side=>['arm','elbow','wrist'].map(j=>`${j}_${side}`));
   if(mode==='torso'||mode==='neck'){const names=spineGuide({},rig,mode).names;return mode==='torso'?[...names,...['arm_left','arm_right'].filter(id=>rig.points[id])]:names;}
   if(mode==='bottoms'&&rig.skirtChains)return [rig.points.pelvis?'pelvis':'body',...skirtChainIds(rig)];
+  if(mode==='tail')return rig.tailChain?[tailParent(rig),...tailChainIds(rig)]:[bone];
   if(mode==='bottoms')return [...new Set(['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?meshChain(rig,mode,h.x,h.y):[];}))];
   const p=rig.points[bone]||{x:0,y:0};return [...new Set(meshChain(rig,mode,p.x,p.y))];
 }
 function weightGuide(layer,rig,mode,bone,x,y){
-  if(mode==='face'||mode==='rigid')return {names:[bone],joints:[]};
+  if(mode==='face'||mode==='rigid'||mode==='tail')return {names:[bone],joints:[]};
   // 팔을 조각으로 쓰는 방식(사용자 예시처럼)에서는 소매도 위팔과 한 조각으로 돈다: 몸통에 반쯤 붙어 있으면 팔을 높이 들 때
   // 겨드랑이 쪽이 남아 늘어진다. 소매 밑 상의 어깨는 flare가 완성해 두었다.
   if(mode.startsWith('sleeve_')&&rig.limbStyle==='arms'&&rig.points[`arm_${mode.slice(7)}`])return {names:[`arm_${mode.slice(7)}`],joints:[]};
@@ -445,11 +454,11 @@ export function buildMesh(layer,rig,mode,bone,setup){
   const guide=weightGuide(layer,rig,mode,bone,layer.x+layer.width/2,layer.y+layer.height/2);
   if(mode==='torso')for(const side of ['left','right']){if(layer.detachedSleeves?.includes(side))continue;const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`];const d=A&&E&&unit(E.x-A.x,E.y-A.y);if(d)guide.joints=[...guide.joints,{id:`arm_${side}`,p:A,dir:d,band:Math.hypot(E.x-A.x,E.y-A.y)*.2}];}
   if(mode==='bottoms')guide.joints=['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?weightGuide(layer,rig,mode,bone,h.x,h.y).joints:[];});
-  const extra=mode==='face'?[...faceCandidates(rig,bone).flatMap(id=>{const p=rig.points[id],r=Math.min(layer.width,layer.height)*(/eye|brow|mouth|nose/.test(id)?.06:.12);return [[p.x-layer.x,p.y-layer.y],...[[r,0],[-r,0],[0,r],[0,-r]].map(([dx,dy])=>[p.x-layer.x+dx,p.y-layer.y+dy])];}),...(bone==='face_root'?interiorGrid(layer,11):/^face_hair_/.test(bone)?hairGrid(layer,rig):[])]:mode==='bottoms'?(rig.skirtChains?skirtPoints(layer,rig):crotchPoints(layer,rig)):[];
+  const extra=mode==='face'?[...faceCandidates(rig,bone).flatMap(id=>{const p=rig.points[id],r=Math.min(layer.width,layer.height)*(/eye|brow|mouth|nose/.test(id)?.06:.12);return [[p.x-layer.x,p.y-layer.y],...[[r,0],[-r,0],[0,r],[0,-r]].map(([dx,dy])=>[p.x-layer.x+dx,p.y-layer.y+dy])];}),...(bone==='face_root'?interiorGrid(layer,11):/^face_hair_/.test(bone)?hairGrid(layer,rig):[])]:mode==='bottoms'?(rig.skirtChains?skirtPoints(layer,rig):crotchPoints(layer,rig)):mode==='tail'?tailMeshPoints(layer,rig):[];
   // 정점 하나의 웨이트(뼈→값). 관절 띠·옷 규칙은 weightGuide/guideWeights가, 세분화는 weight-refine.js가 맡는다.
   const weightAt=(lx0,ly0)=>{const x=layer.x+lx0,y=layer.y+ly0;
     const g=mode==='bottoms'||mode==='legs'||mode==='feet'?weightGuide(layer,rig,mode,bone,x,y):guide;
-    const weights=mode==='face'?faceWeights(layer,rig,bone,x,y):mode==='bottoms'&&rig.skirtChains?skirtWeights(rig,x,y):mode==='bottoms'?crotchWeights(rig,g,guideWeights(g,x,y),x):mode==='torso'?shirtWeights(g,guideWeights({...g,joints:g.joints.filter(j=>!/^arm_/.test(j.id))},x,y),x,y,rig,layer.detachedSleeves):guideWeights(g,x,y);return normalizeBound(weights.map(([id,w])=>[activeBone(rig,id),w]),activeBone(rig,bone));};
+    const weights=mode==='tail'&&rig.tailChain?tailWeights(rig,x,y):mode==='face'?faceWeights(layer,rig,bone,x,y):mode==='bottoms'&&rig.skirtChains?skirtWeights(rig,x,y):mode==='bottoms'?crotchWeights(rig,g,guideWeights(g,x,y),x):mode==='torso'?shirtWeights(g,guideWeights({...g,joints:g.joints.filter(j=>!/^arm_/.test(j.id))},x,y),x,y,rig,layer.detachedSleeves):guideWeights(g,x,y);return normalizeBound(weights.map(([id,w])=>[activeBone(rig,id),w]),activeBone(rig,bone));};
   let topology=silhouetteTopology(layer,guide.joints,rig.meshDensity,extra);
   // 웨이트가 크게 바뀌는 긴 변에 정점을 더 넣어 관절을 가로지르는 큰 삼각형을 없앤다(얼굴·단단한 파츠 제외).
   const rounds=rig.weightRefine??WEIGHT_REFINE_ROUNDS;
@@ -479,7 +488,7 @@ function templateAnimations(rig,ikNames,amplitude){
   const make=(duration,spec)=>{
     const frames=Math.max(1,Math.round(duration*15)),times=Array.from({length:frames+1},(_,i)=>i/frames),bones={};
     // 머리 가닥 체인은 모든 모션에서 늦게 따라 흔들린다(2차 움직임)
-    spec={...hairSwaySpec(rig,duration,{amplitude:2.2*A,energy}),...skirtSwaySpec(rig,duration,{amplitude:1.6*A,energy}),...spec};
+    spec={...hairSwaySpec(rig,duration,{amplitude:2.2*A,energy}),...skirtSwaySpec(rig,duration,{amplitude:1.6*A,energy}),...tailSwaySpec(rig,duration,{amplitude:5*A,energy}),...spec};
     for(const [id,tl]of Object.entries(spec)){if(!active.has(id)||/^(arm|elbow|wrist)_(left|right)$/.test(id)&&!independentArm(rig,id.split('_').at(-1)))continue;const o={};
       if(tl.rotate)o.rotate=times.map(p=>({time:round(p*duration),value:round(tl.rotate(p))}));
       for(const key of ['translate','scale'])if(tl[key])o[key]=times.map(p=>{const [x,y]=tl[key](p);return {time:round(p*duration),x:round(x),y:round(y)};});

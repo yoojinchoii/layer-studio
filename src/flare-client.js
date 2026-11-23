@@ -196,13 +196,13 @@ export async function requestKeypoints({ token, source, signal }) {
 const PART_TEXT = {
   front_hair: 'hair', back_hair: 'back part of the hair seen behind the head', face: 'face skin', neck: 'neck', topwear: 'upper-body clothing (shirt or top)',
   sleeve_r: 'sleeve', sleeve_l: 'sleeve', arm_r: 'arm and hand', arm_l: 'arm and hand', handwear: 'arms and hands',
-  bottomwear: 'lower-body clothing (skirt, shorts or trousers)', legwear_r: 'leg', legwear_l: 'leg', footwear_r: 'shoe', footwear_l: 'shoe',
+  bottomwear: 'lower-body clothing (skirt, shorts or trousers)', legwear_r: 'leg', legwear_l: 'leg', footwear_r: 'shoe', footwear_l: 'shoe', tail: 'tail',
   irides_r: 'iris and pupil of an eye', irides_l: 'iris and pupil of an eye', eyewhite_r: 'white of an eye', eyewhite_l: 'white of an eye',
 };
 // 앞에서 가리던 파츠 이름(프롬프트에서 "이건 그리지 말라"고 알려 준다)
 const COVER_TEXT = {
   front_hair: 'the hair', face: 'the face', neck: 'the neck', topwear: 'the shirt', sleeve_r: 'a sleeve', sleeve_l: 'a sleeve', arm_r: 'an arm', arm_l: 'an arm',
-  handwear: 'the arms', bottomwear: 'the skirt or shorts', footwear_r: 'a shoe', footwear_l: 'a shoe', legwear_r: 'a leg', legwear_l: 'a leg',
+  handwear: 'the arms', bottomwear: 'the skirt or shorts', footwear_r: 'a shoe', footwear_l: 'a shoe', legwear_r: 'a leg', legwear_l: 'a leg', tail: 'the tail',
   eyebrow_r: 'the eyebrows', eyebrow_l: 'the eyebrows', eyelash_r: 'the eyes', eyelash_l: 'the eyes', eyewhite_r: 'the eyes', eyewhite_l: 'the eyes',
   irides_r: 'the eyes', irides_l: 'the eyes', mouth: 'the mouth', nose: 'the nose',
 };
@@ -217,6 +217,7 @@ const PART_HINT = {
   legwear_l: 'The leg continues a little upward under the skirt or shorts and down to the ankle as bare skin; draw it with its outline. Never draw a shoe, boot or sock: footwear is a separate layer. Do not draw the other leg. ',
   bottomwear: 'The waistband continues upward a little under the shirt; draw the hidden top of the garment with its outline. ',
   back_hair: 'Draw the hair mass behind the head and neck that the face and front hair were hiding. ',
+  tail: 'The tail continues under the legs, skirt or body toward its root at the lower back; draw that hidden part of the same tail with its outline, keeping its thickness. Never draw legs, clothing or a second tail. ',
   irides_r: 'Complete the iris and pupil as one full circle or oval with the same rings, colors and highlight style, including the parts hidden under the eyelid skin and lashes. ',
   irides_l: 'Complete the iris and pupil as one full circle or oval with the same rings, colors and highlight style, including the parts hidden under the eyelid skin and lashes. ',
   eyewhite_r: 'Complete the white of the eye as one full smooth almond or round shape that continues under the surrounding skin and lashes, plain white with the same soft shading. Do not draw an iris, pupil, lashes or skin. ',
