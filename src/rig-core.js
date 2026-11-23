@@ -3,6 +3,7 @@ import {namedSide,isArmPart,isHeadAccessory,mergedArmRoots} from './part-identit
 import {faceLabels,faceCandidates,faceWeights,splitFaceLids,facialOffsets} from './face-rig.js';
 import {activeIds,activeBone,chainDefs,availableChain,independentArm} from './rig-scope.js';
 import {hairSwaySpec} from './hair-chains.js';
+import {skirtWeights,skirtChainIds,skirtSwaySpec} from './skirt-chains.js';
 import {separateSleeve} from './garment-parts.js';
 import {silhouetteTopology} from './mesh-topology.js';
 import {refinementPoints} from './weight-refine.js';
@@ -318,6 +319,7 @@ function rawBoneCandidates(rig,index,mode=rig.modes[index],bone=rig.assignments[
   if(mode==='face')return faceCandidates(rig,bone,index);
   if(mode==='rigid'||mode==='crossed_arms')return [bone];if(mode==='split_arms')return ['left','right'].flatMap(side=>['arm','elbow','wrist'].map(j=>`${j}_${side}`));
   if(mode==='torso'||mode==='neck'){const names=spineGuide({},rig,mode).names;return mode==='torso'?[...names,...['arm_left','arm_right'].filter(id=>rig.points[id])]:names;}
+  if(mode==='bottoms'&&rig.skirtChains)return [rig.points.pelvis?'pelvis':'body',...skirtChainIds(rig)];
   if(mode==='bottoms')return [...new Set(['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?meshChain(rig,mode,h.x,h.y):[];}))];
   const p=rig.points[bone]||{x:0,y:0};return [...new Set(meshChain(rig,mode,p.x,p.y))];
 }
@@ -430,15 +432,19 @@ export const WEIGHT_REFINE_ROUNDS=2;
 export function normalizeBound(pairs,fallback){const bound=new Map();for(const [b,w]of pairs)if(Number.isFinite(w)&&w>0)bound.set(b,(bound.get(b)||0)+w);
   for(const [b,w]of bound)if(w<.005&&bound.size>1)bound.delete(b);let sum=0;for(const w of bound.values())sum+=w;
   if(!(sum>0))return new Map([[fallback,1]]);for(const [b,w]of bound)bound.set(b,w/sum);return bound;}
+// 얼굴 바탕처럼 안쪽이 고르게 휘어야 하는 파츠: 그림이 있는 자리에 n×n 격자 정점(레퍼 얼굴 메쉬는 정점 270~300개).
+const skirtPoints=layer=>interiorGrid(layer,9);
+function interiorGrid(layer,n){if(!layer.data)return [];const out=[],step=Math.max(layer.width,layer.height)/n;
+  for(let y=step/2;y<layer.height;y+=step)for(let x=step/2;x<layer.width;x+=step)if(layer.data[(Math.floor(y)*layer.width+Math.floor(x))*4+3]>8)out.push([x,y]);return out;}
 export function buildMesh(layer,rig,mode,bone,setup){
   const guide=weightGuide(layer,rig,mode,bone,layer.x+layer.width/2,layer.y+layer.height/2);
   if(mode==='torso')for(const side of ['left','right']){if(layer.detachedSleeves?.includes(side))continue;const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`];const d=A&&E&&unit(E.x-A.x,E.y-A.y);if(d)guide.joints=[...guide.joints,{id:`arm_${side}`,p:A,dir:d,band:Math.hypot(E.x-A.x,E.y-A.y)*.2}];}
   if(mode==='bottoms')guide.joints=['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?weightGuide(layer,rig,mode,bone,h.x,h.y).joints:[];});
-  const extra=mode==='face'?faceCandidates(rig,bone).flatMap(id=>{const p=rig.points[id],r=Math.min(layer.width,layer.height)*(/eye|brow|mouth|nose/.test(id)?.06:.12);return [[p.x-layer.x,p.y-layer.y],...[[r,0],[-r,0],[0,r],[0,-r]].map(([dx,dy])=>[p.x-layer.x+dx,p.y-layer.y+dy])];}):mode==='bottoms'?crotchPoints(layer,rig):[];
+  const extra=mode==='face'?[...faceCandidates(rig,bone).flatMap(id=>{const p=rig.points[id],r=Math.min(layer.width,layer.height)*(/eye|brow|mouth|nose/.test(id)?.06:.12);return [[p.x-layer.x,p.y-layer.y],...[[r,0],[-r,0],[0,r],[0,-r]].map(([dx,dy])=>[p.x-layer.x+dx,p.y-layer.y+dy])];}),...(bone==='face_root'?interiorGrid(layer,11):[])]:mode==='bottoms'?(rig.skirtChains?skirtPoints(layer,rig):crotchPoints(layer,rig)):[];
   // 정점 하나의 웨이트(뼈→값). 관절 띠·옷 규칙은 weightGuide/guideWeights가, 세분화는 weight-refine.js가 맡는다.
   const weightAt=(lx0,ly0)=>{const x=layer.x+lx0,y=layer.y+ly0;
     const g=mode==='bottoms'||mode==='legs'||mode==='feet'?weightGuide(layer,rig,mode,bone,x,y):guide;
-    const weights=mode==='face'?faceWeights(layer,rig,bone,x,y):mode==='bottoms'?crotchWeights(rig,g,guideWeights(g,x,y),x):mode==='torso'?shirtWeights(g,guideWeights({...g,joints:g.joints.filter(j=>!/^arm_/.test(j.id))},x,y),x,y,rig,layer.detachedSleeves):guideWeights(g,x,y);return normalizeBound(weights.map(([id,w])=>[activeBone(rig,id),w]),activeBone(rig,bone));};
+    const weights=mode==='face'?faceWeights(layer,rig,bone,x,y):mode==='bottoms'&&rig.skirtChains?skirtWeights(rig,x,y):mode==='bottoms'?crotchWeights(rig,g,guideWeights(g,x,y),x):mode==='torso'?shirtWeights(g,guideWeights({...g,joints:g.joints.filter(j=>!/^arm_/.test(j.id))},x,y),x,y,rig,layer.detachedSleeves):guideWeights(g,x,y);return normalizeBound(weights.map(([id,w])=>[activeBone(rig,id),w]),activeBone(rig,bone));};
   let topology=silhouetteTopology(layer,guide.joints,rig.meshDensity,extra);
   // 웨이트가 크게 바뀌는 긴 변에 정점을 더 넣어 관절을 가로지르는 큰 삼각형을 없앤다(얼굴·단단한 파츠 제외).
   const rounds=rig.weightRefine??WEIGHT_REFINE_ROUNDS;
@@ -468,7 +474,7 @@ function templateAnimations(rig,ikNames,amplitude){
   const make=(duration,spec)=>{
     const frames=Math.max(1,Math.round(duration*15)),times=Array.from({length:frames+1},(_,i)=>i/frames),bones={};
     // 머리 가닥 체인은 모든 모션에서 늦게 따라 흔들린다(2차 움직임)
-    spec={...hairSwaySpec(rig,duration,{amplitude:2.2*A,energy}),...spec};
+    spec={...hairSwaySpec(rig,duration,{amplitude:2.2*A,energy}),...skirtSwaySpec(rig,duration,{amplitude:1.6*A,energy}),...spec};
     for(const [id,tl]of Object.entries(spec)){if(!active.has(id)||/^(arm|elbow|wrist)_(left|right)$/.test(id)&&!independentArm(rig,id.split('_').at(-1)))continue;const o={};
       if(tl.rotate)o.rotate=times.map(p=>({time:round(p*duration),value:round(tl.rotate(p))}));
       for(const key of ['translate','scale'])if(tl[key])o[key]=times.map(p=>{const [x,y]=tl[key](p);return {time:round(p*duration),x:round(x),y:round(y)};});
@@ -477,9 +483,12 @@ function templateAnimations(rig,ikNames,amplitude){
   };
   // o = +1 rotates the screen-right limb outward/up (counter-clockwise); the screen-left limb mirrors it.
   const each=(fn)=>Object.assign({},...[['left',-1],['right',1]].map(([side,o])=>fn(side,o)));
-  const idleSpec={chest:{rotate:p=>sin(p,2)*.3*A,scale:p=>[1,1+(1-Math.cos(p*4*Math.PI))*.006*A]},head:{rotate:p=>-sin(p,2,-.08)*.65*A},hair:{rotate:p=>sin(p,2,-.15)*A},
-    ...each((side,o)=>({[`arm_${side}`]:{rotate:p=>-o*sin(p,2)*.75*A},[`elbow_${side}`]:{rotate:p=>-o*sin(p,2,-.1)*1.2*A}}))};
-  out.idle=make(8,idleSpec);
+  // 대기: 레퍼(2.3~5.7초, 머리 5~9°, 몸통 3~8°)처럼 4초 한 호흡에 상체→목→머리→머리카락 순으로 늦게 따라오는 물결.
+  // 발이 미끄러지지 않게 허리(body)는 옮기지 않고 상체 위만 움직인다.
+  const idleSpec={upper:{rotate:p=>sin(p)*1.6*A},chest:{rotate:p=>sin(p,1,-.08)*1.2*A,scale:p=>[1,1+(1-Math.cos(p*2*Math.PI))*.009*A]},neck:{rotate:p=>-sin(p,1,-.16)*1.2*A},
+    head:{rotate:p=>-sin(p,1,-.24)*3.2*A},hair:{rotate:p=>sin(p,1,-.34)*1.6*A},
+    ...each((side,o)=>({[`arm_${side}`]:{rotate:p=>-o*sin(p,1,-.12)*2.4*A},[`elbow_${side}`]:{rotate:p=>-o*sin(p,1,-.22)*4*A},[`wrist_${side}`]:{rotate:p=>-o*sin(p,1,-.32)*5*A}}))};
+  out.idle=make(4,idleSpec);
   // 팔 목표 자세: 화면 오른쪽 팔 기준 월드 각도(위쪽이 +, 0° = 화면 오른쪽). 원화 팔 자세가 어떻든(A포즈·물건 든 팔) 같은 모양이 되게
   // 쉬는 자세에서 목표까지의 회전량을 구한다. 화면 왼쪽 팔은 좌우 대칭(180° - 각도).
   const restWorld=setupPose(rig).world,wrap=a=>((a+540)%360)-180;
@@ -500,12 +509,19 @@ function templateAnimations(rig,ikNames,amplitude){
   energy=1.8;out.hop=make(1,{body:{translate:p=>[0,-legLength*(1-Math.cos(theta*crouch(p)*D2R))+air(p)*16*s]},head:{rotate:p=>-crouch(p)*1.5},hair:{rotate:p=>air(p)*3-crouch(p)*1.5},
     ...each((side,o)=>({[`hip_${side}`]:{rotate:p=>o*theta*crouch(p)},[`knee_${side}`]:{rotate:p=>-o*2*theta*crouch(p)},[`ankle_${side}`]:{rotate:p=>o*theta*crouch(p)},
       [`arm_${side}`]:{rotate:p=>o*(14*air(p)-4*crouch(p))},[`elbow_${side}`]:{rotate:p=>o*6*air(p)}}))});
-  energy=1;for(const [key,{duration,spec}]of Object.entries(demoMotionSpecs(rig,setupPose(rig).world,A))){if(key==='idle_face'){out.idle=make(8,{...idleSpec,...spec});continue;}out[key]=make(duration,spec);}
+  energy=1;for(const [key,{duration,spec}]of Object.entries(demoMotionSpecs(rig,setupPose(rig).world,A))){if(key==='idle_face'){out.idle=make(duration,{...idleSpec,...spec});continue;}out[key]=make(duration,spec);}
   return Object.fromEntries(availableAnimations(rig).map(key=>[key,out[key]]));
 }
 // 조종 뼈 이동량에 곱할 비율: 코가 가장 많이, 볼은 적게(가까운 것은 많이, 먼 것은 적게 움직이는 시차).
 // 눈·눈썹은 볼(face_left/right)의 자식이라 볼 이동에 더해진다.
-export const FACE_TURN_MIX=[['face_nose',.14],['face_mouth',.11],['face_jaw',.08],['face_left',.06],['face_right',.06],['face_eye_left',.05],['face_eye_right',.05],['face_brow_left',.03],['face_brow_right',.03]];
+// 사용자 레퍼(Alice·옥토버페스트·아기 악마)처럼 조종 뼈가 얼굴 폭의 약 7%를 움직이면 눈·입은 0.8, 코 0.95, 앞머리 0.5,
+// 볼 0.3, 뒷머리는 반대로 -0.35 따라와 고개를 돌린 듯한 시차가 난다. 값은 '최종 비율'이고, 부모(예: 눈의 부모인 볼)가
+// 이미 따라온 몫은 빼서 각 뼈 제약 비율로 쓴다.
+export const FACE_TURN_TOTAL={face_nose:.95,face_mouth:.8,face_jaw:.4,face_left:.3,face_right:.3,face_eye_left:.8,face_eye_right:.8,face_brow_left:.8,face_brow_right:.8,face_pupil_left:.8,face_pupil_right:.8,face_hair_front:.5,face_hair_back:-.35};
+export function faceTurnMixes(rig,active=new Set(activeIds(rig))){
+  const inherited=id=>{let p=rig.parents[id];while(p&&p!=='face_turn'&&p!=='root'){if(p in FACE_TURN_TOTAL&&active.has(p))return FACE_TURN_TOTAL[p];p=rig.parents[p];}return 0;};
+  return Object.entries(FACE_TURN_TOTAL).filter(([id])=>active.has(id)).map(([id,total])=>[id,Math.round((total-inherited(id))*100)/100]).filter(([,mix])=>Math.abs(mix)>=.01);
+}
 export function makeSkeleton(parts,rig,amplitude=1){
   const P=rig.points,root=P.root,setup=setupPose(rig),world=setup.world,active=new Set(activeIds(rig)),order=setup.order.filter(id=>active.has(id));setup.order=order;
   const bones=order.map(id=>{if(id==='root')return {name:'root'};const parent=rig.parents[id],[x,y]=toLocal(world,parent,world[id].x,world[id].y);
@@ -520,7 +536,7 @@ export function makeSkeleton(parts,rig,amplitude=1){
   }
   // 얼굴 3D 돌리기(사용자 예시 방식): face_turn을 옮기면 얼굴 세부가 서로 다른 비율로 따라와 고개를 돌린 듯 보인다.
   const transform=[];
-  if(active.has('face_turn'))for(const [id,mix]of FACE_TURN_MIX)if(active.has(id))transform.push({name:`turn_${spineName(id)}`,order:ik.length+transform.length,bones:[spineName(id)],target:spineName('face_turn'),local:true,relative:true,mixRotate:0,mixX:mix,mixY:mix,mixScaleX:0,mixScaleY:0,mixShearY:0});
+  if(active.has('face_turn'))for(const [id,mix]of faceTurnMixes(rig,active))transform.push({name:`turn_${spineName(id)}`,order:ik.length+transform.length,bones:[spineName(id)],target:spineName('face_turn'),local:true,relative:true,mixRotate:0,mixX:mix,mixY:mix,mixScaleX:0,mixScaleY:0,mixShearY:0});
   const attachments={},slots=[];
   for(let i=parts.length-1;i>=0;i--){const l=parts[i],name=l.slot??`part_${String(i+1).padStart(2,'0')}`,bone=activeBone(rig,l.bone??rig.assignments[i]),mode=l.mode??rig.modes[i];
     const slot={name,bone:spineName(bone)};if(l.visible!==false)slot.attachment=name;slot.color='ffffff'+Math.round((l.opacity??1)*255).toString(16).padStart(2,'0');slots.push(slot);

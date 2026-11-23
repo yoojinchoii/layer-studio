@@ -117,6 +117,16 @@ export function splitFaceLids(layer,rig){
 }
 export function faceWeights(layer,rig,bone,x,y){const weights=rawFaceWeights(layer,rig,bone,x,y),total=weights.reduce((s,[,v])=>s+v,0);return total>0?weights.map(([id,v])=>[id,v/total]):[[bone,1]];}
 function rawFaceWeights(layer,rig,bone,x,y){
+  // 속눈썹·눈썹·코·입 조각은 그 자리 얼굴 바탕과 같은 웨이트를 쓴다(레퍼처럼 이목구비가 얼굴과 한 몸으로 움직임).
+  // 조각에 얼굴 선(볼·콧대)이 섞여 있어도 고개를 돌리거나 표정을 지을 때 얼굴과 어긋나 찢어지지 않는다.
+  // 눈꺼풀·눈썹 뼈는 눈 뼈의 자식이므로 눈 몫을 자기 뼈로 바꾸면 얼굴과 같이 가면서 깜빡임·눈썹 이동만 더해진다.
+  const detail=bone.match(/^face_(lid_upper|lid_lower|brow)_(left|right)$/);
+  if((detail||/^face_(nose|mouth)$/.test(bone))&&rig.faceGeometry?.face){
+    const fw=rig.faceGeometry.face.width;
+    const all=faceCandidates(rig,'face_root'),eye=detail&&`face_eye_${detail[2]}`,swap=detail&&rig.parents[bone]===eye;
+    const merged=new Map();for(const [id,w]of fieldWeights(rig,all,x,y,fw)){const to=swap&&id===eye?bone:id;merged.set(to,(merged.get(to)||0)+w);}
+    if(merged.size)return [...merged].filter(([,w])=>w>0);
+  }
   const requested=rig.partBones?.[layer.source],ids=faceCandidates(rig,bone).filter(id=>!requested||requested.includes(id));if(!ids.length)ids.push(bone);if(ids.length===1)return [[ids[0],1]];
   const P=rig.points,fw=rig.faceGeometry?.face?.width||Math.max(20,Math.abs(P.face_left.x-P.face_right.x)*1.5),smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
   if(bone==='hair'||bone.startsWith('face_hair_')){const w=smooth((y-layer.y)/Math.max(1,layer.height)),base=[[ids.includes('head')?'head':bone,1-w],[bone,w]].filter(([,v])=>v>0);
@@ -129,6 +139,11 @@ function rawFaceWeights(layer,rig,bone,x,y){
     const upper=`face_lid_upper_${which}`,lower=`face_lid_lower_${which}`,id=y<P[eye].y?upper:lower,w=0;return [[eye,1-w],[id,w]].filter(([id,v])=>ids.includes(id)&&v>0);
   }
   if(bone!=='face_root'){const total=ids.length;return ids.map(id=>[id,1/total]);}
+  return fieldWeights(rig,ids,x,y,fw);
+}
+// 얼굴 바탕 메쉬의 웨이트 장(場): 기준(face_root) + 가까운 이목구비 뼈 최대 3개, 눈 구멍 둘레는 눈 뼈 100%.
+function fieldWeights(rig,ids,x,y,fw){
+  const P=rig.points,smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
   // Compact supports, with an anchored base. Distant points never pull the entire face.
   const weights=ids.filter(id=>id!=='face_root').map(id=>{const p=P[id],feature=/eye|brow|mouth|nose/.test(id),rx=fw*(feature?.22:.48),ry=fw*(feature?.15:.4),d=Math.hypot((x-p.x)/rx,(y-p.y)/ry),w=(1-smooth(d))*(feature?.8:.5);return [id,w];}).filter(([,w])=>w>.001).sort((a,b)=>b[1]-a[1]).slice(0,3);
   const total=weights.reduce((s,[,w])=>s+w,0),factor=total>.9?.9/total:1,base=[['face_root',1-total*factor],...weights.map(([id,w])=>[id,w*factor])].filter(([id,w])=>ids.includes(id)&&w>0);
