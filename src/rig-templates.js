@@ -3,7 +3,7 @@ import {addHairChains} from './hair-chains.js';
 import {addSkirtChains} from './skirt-chains.js';
 import {addTailChain} from './tail-chain.js';
 import {configureFace,extendHalfFace} from './face-rig.js';
-import {inferRig,refineRig,boneOrder,boneLabels} from './rig-core.js';
+import {inferRig,refineRig,boneOrder,boneLabels,centerJoints} from './rig-core.js';
 import {activeIds,chainDefs,availableChain,validateControls} from './rig-scope.js';
 export const templateKinds={full:'전신',half:'반신',bust:'흉상 · 얼굴 전용'};
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v)),copy=v=>JSON.parse(JSON.stringify(v));
@@ -40,6 +40,8 @@ export function applyBuiltin(kind,layers,width,height){
   if(kind==='bust')fitPartial(rig,layers,kind);
   rig.frame=kind;rig.activeBones=scopedBones(rig,layers,kind);if(kind==='bust')configureFace(rig,layers);rig.pose={};rig.ikModes=Object.fromEntries(Object.keys(chainDefs).filter(key=>availableChain(rig,key)).map(key=>[key,'fk']));rig.ikTargets={};rig.ikBends={};
   extendHalfFace(rig,layers);addHairChains(rig,layers);addSkirtChains(rig,layers);addTailChain(rig,layers);restoreArmChains(rig,layers);
+  // 팔꿈치·손목·무릎·발목을 팔다리 단면 가운데로: 가장자리에 붙으면 관절 덮개(캡)가 폭의 일부만 덮어 굽힐 때 틈이 난다.
+  centerJoints(rig,layers);
   // No remote AI or old mesh transfer: every derived mesh uses the destination pixels.
   return {rig,matched:layers.length,unmatched:[]};
 }

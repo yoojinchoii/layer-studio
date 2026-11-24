@@ -10,7 +10,7 @@ function fixture(alpha=255){
 }
 function rgba(part,x,y){if(x<part.x||y<part.y||x>=part.x+part.width||y>=part.y+part.height)return [0,0,0,0];return Array.from(part.data.slice(((y-part.y)*part.width+x-part.x)*4,((y-part.y)*part.width+x-part.x)*4+4));}
 function over(a,b){const aa=a[3]/255,ba=b[3]/255,alpha=aa+ba*(1-aa);return [...a.slice(0,3).map((v,i)=>alpha?(v*aa+b[i]*ba*(1-aa))/alpha:0),alpha*255];}
-test('a detached sleeve cannot pull torso vertices, including after a project reload',()=>{
+test('a detached sleeve pulls only the hidden shoulder of the torso, and only part way, including after a project reload',()=>{
   const {layers,rig}=fixture();initSleeves(layers,rig);
   // Place the shirt beside the shoulder, where the old integrated-sleeve heuristic assigns arm weights.
   layers[0].x=60;rig.points.chest={x:120,y:90};
@@ -18,8 +18,12 @@ test('a detached sleeve cannot pull torso vertices, including after a project re
     const parts=buildParts(layers,r),shirt=parts.find(p=>p.source===0),sleeve=parts.find(p=>p.role==='sleeve'),sk=makeSkeleton(parts,r),rest=poseMatrices(sk),posed=poseMatrices(sk,null,{upper_arm_R:65});
     assert.deepEqual(shirt.detachedSleeves,['left']);
     const a=sk.skins[0].attachments[shirt.slot][shirt.slot],b=sk.skins[0].attachments[sleeve.slot][sleeve.slot];
-    assert.deepEqual(meshWorldVertices(a,sk,posed),meshWorldVertices(a,sk,rest));
-    assert.notDeepEqual(meshWorldVertices(b,sk,posed),meshWorldVertices(b,sk,rest));
+    // 소매 밑 어깨만 팔을 반쯤 따라간다(팔을 들 때 어깨 혹 방지): 상의 정점 대부분은 그대로, 움직이는 것도 소매보다 훨씬 적게.
+    const move=(m)=>{const r=meshWorldVertices(m,sk,rest),q=meshWorldVertices(m,sk,posed);return r.map((p,i)=>Math.hypot(p[0]-q[i][0],p[1]-q[i][1]));};
+    const shirtMove=move(a),sleeveMove=move(b);
+    assert.ok(Math.max(...shirtMove)<Math.max(...sleeveMove)*.6,`${Math.max(...shirtMove)} vs ${Math.max(...sleeveMove)}`);
+    assert.ok(shirtMove.filter(d=>d<.01).length>shirtMove.length*.5);
+    assert.ok(Math.max(...sleeveMove)>5);
   }
 });
 test('short sleeve follows the upper arm, blends into the torso at the shoulder, and skin keeps its own arm weights',()=>{

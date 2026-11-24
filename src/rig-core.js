@@ -203,7 +203,10 @@ export function splitLimb(layer,rig,mode){
     const i=y*W+x;if(!layer.data[i*4+3])continue;const px=layer.x+x+.5,py=layer.y+y+.5;
     let ci=0;if(chains.length>1){let best=Infinity;chains.forEach((c,k)=>{const d=chainInfo(c.guide,px,py).distance;if(d<best){best=d;ci=k;}});}
     const c=chains[ci];owner[i]=ci;if(kind==='feet')continue;
-    const side=([j,n])=>(px-j.x)*n.x+(py-j.y)*n.y;segOf[i]=side(c.planes[0])<0?0:side(c.planes[1])<0?1:2;
+    // 위팔/아래팔: 더 가까운 뼈(어깨–팔꿈치 선분 vs 팔꿈치에서 손목 너머로 뻗은 반직선). 곧은 팔에선 팔꿈치 평면과 같고,
+    // 거의 접힌 팔(잔을 든 팔)에서는 평면이 팔을 엉뚱하게 가른다. 아래팔/손은 손목 평면으로.
+    const side=([j,n])=>(px-j.x)*n.x+(py-j.y)*n.y,[A,E,Wp]=c.pts,toSeg=(a,b,ray)=>{const dx=b.x-a.x,dy=b.y-a.y,L=dx*dx+dy*dy||1,t=Math.max(0,ray?((px-a.x)*dx+(py-a.y)*dy)/L:Math.min(1,((px-a.x)*dx+(py-a.y)*dy)/L));return Math.hypot(px-a.x-t*dx,py-a.y-t*dy);};
+    segOf[i]=toSeg(A,E,false)<toSeg(E,Wp,true)?0:side(c.planes[1])<0?1:2;
   }
   const parts=[];
   chains.forEach((c,ci)=>{for(let seg=joints.length-1;seg>=0;seg--){
@@ -244,15 +247,25 @@ export function applyPose(rig,keypoints,minScore=.3){
   return n;
 }
 // Move each limb joint to the middle of the limb's cross-section (keypoints often sit near an edge).
+// 팔은 맨팔+소매, 다리는 다리+신발을 합친 윤곽으로 본다(팔꿈치가 소매 밑이면 소매 단면 가운데로).
+// 관절이 윤곽 밖에 찍혔으면(flare 관절이 팔 바깥 몇 px에 오는 경우) 단면 방향으로 가장 가까운 윤곽을 찾아 그 가운데로 옮긴다.
+// 관절이 가장자리에 있으면 조각 끝 둥근 덮개가 폭의 일부만 덮어 굽힐 때 틈이 난다.
 export function centerJoints(rig,layers){
-  const P=rig.points,limb={arm_left:['arm','elbow','wrist'],arm_right:['arm','elbow','wrist'],legs:['hip','knee','ankle']};
-  layers.forEach((l,i)=>{const mode=rig.modes[i],chain=limb[mode];if(!chain||!l.data)return;
-    for(const side of mode==='legs'?['left','right']:[mode.slice(4)]){const ids=chain.map(j=>`${j}_${side}`);if(ids.some(id=>!P[id]))continue;
-      for(const k of [1,2]){const a=P[ids[k-1]],b=P[ids[k]],c=P[ids[k+1]]||b,d0=unit(b.x-a.x,b.y-a.y),d1=unit(c.x-b.x,c.y-b.y)||d0;if(!d0)continue;const n=unit(d0.x+d1.x,d0.y+d1.y)||d0,perp={x:-n.y,y:n.x};
-        const alpha=(x,y)=>{const px=Math.floor(x-l.x),py=Math.floor(y-l.y);return px<0||py<0||px>=l.width||py>=l.height?0:l.data[(py*l.width+px)*4+3];};
-        if(alpha(b.x,b.y)<64)continue;const reach=s=>{let t=0;while(t<400&&alpha(b.x+perp.x*s*(t+1),b.y+perp.y*s*(t+1))>=64)t++;return t;},shift=(reach(1)-reach(-1))/2;
-        P[ids[k]]={x:clamp(b.x+perp.x*shift,0,rig.width),y:clamp(b.y+perp.y*shift,0,rig.height)};}}
-  });
+  const P=rig.points,kinds={arm:['arm','elbow','wrist'],leg:['hip','knee','ankle']};
+  const member=(mode,kind,side)=>kind==='arm'?mode===`arm_${side}`||mode===`sleeve_${side}`:mode===`leg_${side}`||mode==='legs'||mode===`foot_${side}`||mode==='feet';
+  for(const [kind,chain]of Object.entries(kinds))for(const side of ['left','right']){
+    const ids=chain.map(j=>`${j}_${side}`);if(ids.some(id=>!P[id]))continue;
+    const ls=layers.filter((l,i)=>l.data&&member(rig.modes[i],kind,side));if(!ls.length||!ls.some((l,i)=>rig.modes[layers.indexOf(l)]===(kind==='arm'?`arm_${side}`:`leg_${side}`)||rig.modes[layers.indexOf(l)]==='legs'))continue;
+    const alpha=(x,y)=>{let a=0;for(const l of ls){const px=Math.floor(x-l.x),py=Math.floor(y-l.y);if(px<0||py<0||px>=l.width||py>=l.height)continue;a=Math.max(a,l.data[(py*l.width+px)*4+3]);}return a;};
+    for(const k of [1,2]){const a=P[ids[k-1]],b=P[ids[k]],c=P[ids[k+1]]||b,d0=unit(b.x-a.x,b.y-a.y),d1=unit(c.x-b.x,c.y-b.y)||d0;if(!d0)continue;const n=unit(d0.x+d1.x,d0.y+d1.y)||d0,perp={x:-n.y,y:n.x};
+      const seg=Math.min(Math.hypot(b.x-a.x,b.y-a.y),k<2?Math.hypot(c.x-b.x,c.y-b.y):Infinity),limit=Math.max(4,seg*.35),at=t=>alpha(b.x+perp.x*t,b.y+perp.y*t)>=64;
+      let lo,hi;
+      if(at(0)){lo=0;hi=0;while(lo>-400&&at(lo-1))lo--;while(hi<400&&at(hi+1))hi++;}
+      else{let hit=null;for(let t=1;t<=limit&&hit===null;t++){if(at(t))hit=t;else if(at(-t))hit=-t;}if(hit===null)continue;
+        const s=Math.sign(hit);lo=hi=hit;while(Math.abs(hi)<400&&at(hi+s))hi+=s;if(s<0)[lo,hi]=[hi,lo];}
+      if(hi-lo<2)continue;const shift=(lo+hi)/2;
+      P[ids[k]]={x:clamp(b.x+perp.x*shift,0,rig.width),y:clamp(b.y+perp.y*shift,0,rig.height)};}
+  }
 }
 // Held props (objects, weapons) follow the nearest hand instead of staying on the root.
 export function attachProps(rig,layers){
@@ -331,13 +344,30 @@ function rawBoneCandidates(rig,index,mode=rig.modes[index],bone=rig.assignments[
   if(mode==='bottoms'&&rig.skirtChains)return [rig.points.pelvis?'pelvis':'body',...skirtChainIds(rig)];
   if(mode==='tail')return rig.tailChain?[tailParent(rig),...tailChainIds(rig)]:[bone];
   if(mode==='bottoms')return [...new Set(['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?meshChain(rig,mode,h.x,h.y):[];}))];
-  const p=rig.points[bone]||{x:0,y:0};return [...new Set(meshChain(rig,mode,p.x,p.y))];
+  const p=rig.points[bone]||{x:0,y:0},side=mode.startsWith('sleeve_')&&mode.slice(7);return [...new Set([...meshChain(rig,mode,p.x,p.y),...(side&&rig.points[`elbow_${side}`]?[`elbow_${side}`]:[])])];
+}
+// 소매 픽셀의 10% 넘게 팔꿈치 너머(위팔 길이의 115% 밖)에 있으면 긴 소매
+function longSleeve(layer,A,E){
+  if(!layer?.data)return false;if(layer._longSleeve!==undefined)return layer._longSleeve;
+  const len=Math.hypot(E.x-A.x,E.y-A.y);if(len<4)return layer._longSleeve=false;const dx=(E.x-A.x)/len,dy=(E.y-A.y)/len;let n=0,past=0;
+  for(let y=0;y<layer.height;y+=2)for(let x=0;x<layer.width;x+=2){if(layer.data[(y*layer.width+x)*4+3]<128)continue;n++;if((layer.x+x-A.x)*dx+(layer.y+y-A.y)*dy>len*1.15)past++;}
+  return layer._longSleeve=n>0&&past/n>.1;
 }
 function weightGuide(layer,rig,mode,bone,x,y){
   if(mode==='face'||mode==='rigid'||mode==='tail')return {names:[bone],joints:[]};
   // 팔을 조각으로 쓰는 방식(사용자 예시처럼)에서는 소매도 위팔과 한 조각으로 돈다: 몸통에 반쯤 붙어 있으면 팔을 높이 들 때
   // 겨드랑이 쪽이 남아 늘어진다. 소매 밑 상의 어깨는 flare가 완성해 두었다.
-  if(mode.startsWith('sleeve_')&&rig.limbStyle==='arms'&&rig.points[`arm_${mode.slice(7)}`])return {names:[`arm_${mode.slice(7)}`],joints:[]};
+  if(mode.startsWith('sleeve_')&&rig.limbStyle==='arms'&&rig.points[`arm_${mode.slice(7)}`]){
+    // 긴 소매(팔꿈치를 넘어 손목까지 덮는 소매)는 팔꿈치에서 같이 굽는다: 위팔에 통째로 붙이면 팔을 굽힐 때 끝동이 아래팔에서 떨어진다.
+    const side=mode.slice(7),A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`],W=rig.points[`wrist_${side}`];
+    if(!E||!longSleeve(layer,A,E))return {names:[`arm_${side}`],joints:[]};
+    const incoming=unit(E.x-A.x,E.y-A.y)||{x:0,y:1},outgoing=W&&unit(W.x-E.x,W.y-E.y),dir=outgoing&&unit(incoming.x+outgoing.x,incoming.y+outgoing.y)||incoming;
+    const len=Math.min(Math.hypot(E.x-A.x,E.y-A.y),W?Math.hypot(W.x-E.x,W.y-E.y):Infinity),thickness=layer.data?halfWidth(layer,E,dir):null;
+    const blend=clamp(Number(rig.weightBlend?.[`elbow_${side}`])||1,.35,2),band=clamp((thickness===null?len*.12:Math.max(2,thickness)*.9)*blend,1,Math.max(1,len*.3));
+    const names=[`arm_${side}`,`elbow_${side}`],requested=layer.allowedBones||rig.partBones?.[layer.source];
+    const allowed=Array.isArray(requested)?names.filter(n=>requested.includes(n)||(n===names[1]&&requested.includes(names[0]))):names;
+    return {names,joints:[{id:names[1],p:E,dir,band}],allowed:allowed.length?allowed:names,points:[A,E]};
+  }
   if(mode==='torso'||mode==='neck')return spineGuide(layer,rig,mode);
   const names=meshChain(rig,mode,x,y),points=names.map(id=>rig.points[id]),joints=[];
   for(let i=1;i<names.length;i++){
@@ -384,10 +414,13 @@ function spineGuide(layer,rig,mode){
 function shirtArm(rig,x,y,detachedSleeves=[]){
   let best=null;
   for(const side of ['left','right']){
-    if(detachedSleeves.includes(side))continue;
+    const detached=detachedSleeves.includes(side);if(detached&&!independentArm(rig,side))continue;
     const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`],C=rig.points.chest;if(!A||!E||!C)continue;
     const len=Math.hypot(E.x-A.x,E.y-A.y);if(len<4)continue;const d={x:(E.x-A.x)/len,y:(E.y-A.y)/len};let o={x:-d.y,y:d.x};if(o.x*(A.x-C.x)+o.y*(A.y-C.y)<0)o={x:-o.x,y:-o.y};
     const r=len*.2,blend=clamp(Number(rig.weightBlend?.[`arm_${side}`])||1,.35,2),t=(x-A.x)*d.x+(y-A.y)*d.y,u=(x-A.x)*o.x+(y-A.y)*o.y;
+    // 소매가 따로 있으면: 소매 밑에 가려진 상의 어깨(팔 선 바깥, 위팔 위쪽 절반)만 팔을 반쯤 따라간다.
+    // 팔을 들 때 그 자리가 몸통에 남아 어깨에 둥근 혹처럼 드러나던 문제.
+    if(detached){const w=.55*smooth((t+r*.2)/(r*.8))*smooth((u+r*.2)/(r*.5))*(1-smooth((t-len*.3)/(len*.25)));if(w>.005&&(!best||w>best[1]))best=[`arm_${side}`,w];continue;}
     // Only the sleeve: past ~¾ of the upper arm the shirt is torso again.
     const w=smooth((t+r*.3*blend)/(r*blend))*smooth((u+r*1.5)/(r*.6))*(1-smooth((t-len*.75)/(len*.2)));if(w>.005&&(!best||w>best[1]))best=[`arm_${side}`,w];
   }
@@ -452,7 +485,7 @@ function interiorGrid(layer,n){if(!layer.data)return [];const out=[],step=Math.m
   for(let y=step/2;y<layer.height;y+=step)for(let x=step/2;x<layer.width;x+=step)if(layer.data[(Math.floor(y)*layer.width+Math.floor(x))*4+3]>8)out.push([x,y]);return out;}
 export function buildMesh(layer,rig,mode,bone,setup){
   const guide=weightGuide(layer,rig,mode,bone,layer.x+layer.width/2,layer.y+layer.height/2);
-  if(mode==='torso')for(const side of ['left','right']){if(layer.detachedSleeves?.includes(side))continue;const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`];const d=A&&E&&unit(E.x-A.x,E.y-A.y);if(d)guide.joints=[...guide.joints,{id:`arm_${side}`,p:A,dir:d,band:Math.hypot(E.x-A.x,E.y-A.y)*.2}];}
+  if(mode==='torso')for(const side of ['left','right']){if(layer.detachedSleeves?.includes(side)&&!independentArm(rig,side))continue;const A=rig.points[`arm_${side}`],E=rig.points[`elbow_${side}`];const d=A&&E&&unit(E.x-A.x,E.y-A.y);if(d)guide.joints=[...guide.joints,{id:`arm_${side}`,p:A,dir:d,band:Math.hypot(E.x-A.x,E.y-A.y)*.2}];}
   if(mode==='bottoms')guide.joints=['left','right'].flatMap(s=>{const h=rig.points[`hip_${s}`];return h?weightGuide(layer,rig,mode,bone,h.x,h.y).joints:[];});
   const extra=mode==='face'?[...faceCandidates(rig,bone).flatMap(id=>{const p=rig.points[id],r=Math.min(layer.width,layer.height)*(/eye|brow|mouth|nose/.test(id)?.06:.12);return [[p.x-layer.x,p.y-layer.y],...[[r,0],[-r,0],[0,r],[0,-r]].map(([dx,dy])=>[p.x-layer.x+dx,p.y-layer.y+dy])];}),...(bone==='face_root'?interiorGrid(layer,11):/^face_hair_/.test(bone)?hairGrid(layer,rig):[])]:mode==='bottoms'?(rig.skirtChains?skirtPoints(layer,rig):crotchPoints(layer,rig)):mode==='tail'?tailMeshPoints(layer,rig):[];
   // 정점 하나의 웨이트(뼈→값). 관절 띠·옷 규칙은 weightGuide/guideWeights가, 세분화는 weight-refine.js가 맡는다.
@@ -516,9 +549,13 @@ function templateAnimations(rig,ikNames,amplitude){
   out.wave=make(1.6,{chest:{rotate:p=>sin(p)*.8},head:{rotate:p=>sin(p,1,.25)*1.5},hair:{rotate:p=>-sin(p,1,.1)*1.2},
     // 손 흔들기: 위팔을 어깨 높이 위로(75°), 아래팔은 위로 세우고(팔꿈치 70°) 팔꿈치에서 좌우로 두 번 흔든다. 손목은 반 박자 늦게.
     [`arm_${ws}`]:{rotate:p=>(waveArm.arm*(wm==='toast'?(1-Math.cos(p*2*Math.PI))/2:1)+wo*sin(p)*3*swing)*A},[`elbow_${ws}`]:{rotate:p=>(waveArm.elbow*(wm==='toast'?(1-Math.cos(p*2*Math.PI))/2:1)+wo*sin(p,2)*22*swing)*A},[`wrist_${ws}`]:{rotate:p=>(wm==='toast'?-(waveArm.arm+waveArm.elbow)*.85*(1-Math.cos(p*2*Math.PI))/2:0)+wo*sin(p,2,-.12)*12*swing*A},[`arm_${other}`]:{rotate:p=>sin(p)*1}});
+  const faceBox=rig.faceGeometry?.face,chibi=!!faceBox&&faceBox.height>rig.height*.22;
   energy=1.3;out.cheer=make(1.2,{body:{translate:p=>[0,(1-Math.cos(p*4*Math.PI))*1.5*s]},head:{rotate:p=>sin(p)*2},hair:{rotate:p=>-sin(p,2,.1)*1.5},
     // 환호: 두 팔을 머리 위로(위팔 100°) 들고 박자에 맞춰 조금씩 흔든다
-    ...each((side,o)=>{const r=reach(side,40,55);return {[`arm_${side}`]:{rotate:p=>(r.arm+o*sin(p,2)*8)*A},[`elbow_${side}`]:{rotate:p=>(r.elbow+o*sin(p,2,.08)*8)*A}};})});
+    // 머리가 큰(2~3등신) 캐릭터는 머리 위로 들면 팔이 머리 뒤로 숨는다 → 위팔은 어깨 높이, 아래팔을 세워 머리 옆에서 흔든다.
+    // 물건 든 손은 손목을 반대로 돌려 물건이 서 있게(건배와 같은 방식).
+    ...each((side,o)=>{const r=chibi?reach(side,0,45):reach(side,40,55),held=(rig.holding||[]).includes(side);return {[`arm_${side}`]:{rotate:p=>(r.arm+o*sin(p,2)*8)*A},[`elbow_${side}`]:{rotate:p=>(r.elbow+o*sin(p,2,.08)*8)*A},
+      ...(held?{[`wrist_${side}`]:{rotate:p=>-(r.arm+r.elbow)*.85*A}}:{})};})});
   // Hop: crouch → jump → land. The body dip matches how much the bent legs shorten, so feet stay on the ground.
   const crouch=p=>p<.2?Math.sin(Math.PI*p/.2):p>=.75?Math.sin(Math.PI*(p-.75)/.25)*.7:0,air=p=>p>=.2&&p<.75?Math.sin(Math.PI*(p-.2)/.55):0,theta=9;
   const leg=side=>P[`hip_${side}`]&&P[`knee_${side}`]&&P[`ankle_${side}`]?Math.hypot(P[`knee_${side}`].x-P[`hip_${side}`].x,P[`knee_${side}`].y-P[`hip_${side}`].y)+Math.hypot(P[`ankle_${side}`].x-P[`knee_${side}`].x,P[`ankle_${side}`].y-P[`knee_${side}`].y):0;
@@ -585,6 +622,7 @@ export function makeSkeleton(parts,rig,amplitude=1){
   const skeleton={skeleton:{spine:'4.0.64',x:-rig.width/2,y:0,width:rig.width,height:rig.height,images:'./images/',fps:30},bones,slots};
   if(ik.length)skeleton.ik=ik;if(transform.length)skeleton.transform=transform;
   const validNames=new Set(bones.map(b=>b.name));for(const anim of Object.values(animations))for(const name of Object.keys(anim.bones||{}))if(!validNames.has(name))delete anim.bones[name];
+  plantHands(skeleton,animations,rig);
   // IK edits are also baked into FK rotations. Target keys let Spine retain the selected IK mode.
   const posed=poseMatrices({...skeleton,animations},0,{},'manual_pose');
   for(const constraint of ik){const key=ikKeys.get(constraint.name);if(rig.ikModes?.[key]!=='ik')continue;
@@ -593,6 +631,36 @@ export function makeSkeleton(parts,rig,amplitude=1){
     animations.manual_pose.ik[constraint.name]=[{mix:1,bendPositive:(rig.ikBends?.[key]||1)>0}];
   }
   return {...skeleton,skins:[{name:'default',attachments}],animations};
+}
+// 허리에 얹은 손(akimbo)은 모든 모션에서 골반에 붙어 있게: 프레임마다 두 뼈 IK를 풀어 위팔·아래팔 회전을 고쳐 굽는다(Spine에서도 FK 키라 그대로).
+// 상체가 숨 쉬듯 돌면 어깨가 움직여 손이 허리에서 떠 보이던 문제. 두 팔을 드는 환호·그 팔로 흔드는 손 흔들기는 제외.
+function plantHands(skeleton,animations,rig){
+  const sides=['left','right'].filter(side=>akimbo(rig,side)&&rig.points[`elbow_${side}`]);if(!sides.length)return;
+  const anchorId=rig.points.pelvis?'pelvis':rig.points.body?'body':null;if(!anchorId)return;
+  const sk={...skeleton,animations},rest=poseMatrices(sk),A=spineName(anchorId),ang=m=>Math.atan2(m[1],m[0]),wrapR=a=>Math.atan2(Math.sin(a),Math.cos(a));
+  const inv=m=>{const d=m[0]*m[3]-m[1]*m[2];return [m[3]/d,-m[1]/d,-m[2]/d,m[0]/d,(m[2]*m[5]-m[3]*m[4])/d,(m[1]*m[4]-m[0]*m[5])/d];},apply=(m,x,y)=>[m[0]*x+m[2]*y+m[4],m[1]*x+m[3]*y+m[5]];
+  const ws=waveSide(rig);
+  for(const side of sides){
+    const [S,E,W]=['arm','elbow','wrist'].map(j=>spineName(`${j}_${side}`));if(!rest[S]||!rest[E]||!rest[W]||!rest[A])continue;
+    const pos=m=>[m[4],m[5]],l1=Math.hypot(rest[E][4]-rest[S][4],rest[E][5]-rest[S][5]),l2=Math.hypot(rest[W][4]-rest[E][4],rest[W][5]-rest[E][5]);if(l1<1||l2<1)continue;
+    const local=apply(inv(rest[A]),...pos(rest[W])),handRel=ang(rest[W])-ang(rest[A]);
+    const bend=Math.sign((rest[E][4]-rest[S][4])*(rest[W][5]-rest[E][5])-(rest[E][5]-rest[S][5])*(rest[W][4]-rest[E][4]))||1;
+    for(const [name,anim]of Object.entries(animations)){
+      if(name==='manual_pose'||name==='cheer'||name==='wave'&&ws?.side===side)continue;
+      const times=Object.values(anim.bones||{}).flatMap(tl=>Object.values(tl)).find(f=>f?.length>1)?.map(f=>f.time||0);if(!times)continue;
+      const keys={[S]:[],[E]:[],[W]:[]};
+      for(const t of times){
+        const m=poseMatrices(sk,t,{},name),[tx,ty]=apply(m[A],...local),[sx,sy]=pos(m[S]);
+        const d=clamp(Math.hypot(tx-sx,ty-sy),Math.abs(l1-l2)+.01,l1+l2-.01),base=Math.atan2(ty-sy,tx-sx),a1=Math.acos(clamp((l1*l1+d*d-l2*l2)/(2*l1*d),-1,1));
+        const upper=base-bend*a1,ex=sx+l1*Math.cos(upper),ey=sy+l1*Math.sin(upper),fore=Math.atan2(ty-ey,tx-ex);
+        const curUpper=Math.atan2(m[E][5]-sy,m[E][4]-sx),curFore=Math.atan2(m[W][5]-m[E][5],m[W][4]-m[E][4]);
+        const dS=wrapR(upper-curUpper),dE=wrapR(fore-(curFore+dS)),dW=wrapR(ang(m[A])+handRel-(ang(m[W])+dS+dE));
+        const cur=id=>sample(anim.bones[id]?.rotate,t,'value',0);
+        keys[S].push({time:t,value:round(cur(S)+dS/D2R)});keys[E].push({time:t,value:round(cur(E)+dE/D2R)});keys[W].push({time:t,value:round(cur(W)+dW/D2R)});
+      }
+      for(const id of [S,E,W])(anim.bones[id]??={}).rotate=keys[id];
+    }
+  }
 }
 function sample(frames,t,key,def){if(!frames?.length)return def;let a=frames[0],b=a;for(const f of frames){if((f.time||0)<=t)a=f;if((f.time||0)>=t){b=f;break;}b=f;}const at=a.time||0,bt=b.time||0,r=bt===at?0:(t-at)/(bt-at);return (a[key]??def)*(1-r)+(b[key]??def)*r;}
 export function animationDuration(animation){let d=0;for(const tl of Object.values(animation?.bones||{}))for(const frames of Object.values(tl))for(const f of frames)d=Math.max(d,f.time||0);return d;}
