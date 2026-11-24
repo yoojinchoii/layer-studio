@@ -537,13 +537,33 @@ export function fitJoints(fg, w, h) {
  * ai = { neck, shoulder_left, elbow_left, wrist_left, shoulder_right, …, hip_left, knee_left, ankle_left, … } (없는 키는 그대로 둔다)
  * 팔·다리는 셋이 다 있을 때만 바꾸고, 다리를 바꾸면 허리·골반·가슴을 목–엉덩이 사이 비율로 다시 잡는다.
  */
-export function applyAiJoints(rig, ai) {
+export function applyAiJoints(rig, ai, { fg = null, labels = null, width: W = 0, height: H = 0 } = {}) {
   if (!rig?.points || !ai) return rig;
   const P = rig.points, used = [], missing = new Set(rig.missing || []);
   const ok = (p) => p && Number.isFinite(p.x) && Number.isFinite(p.y);
-  if (ok(ai.neck)) { P.neck = { ...ai.neck }; used.push('neck'); }
+  // flare는 관절 그림을 원화와 상관없이 화면을 채운 표준 전신 막대 인형으로 그리곤 한다(아래가 잘린 반신 그림에도 빈 바탕에 다리,
+  // 머리카락 위에 어깨). 점 근처(반지름 r)에 그림(fg)이나 그 관절이 있을 만한 부위(flare 부위 지도 번호)가 있을 때만 믿는다.
+  // 경계의 섞인 색(머리카락 빨강+얼굴 노랑 = 목 주황)에 속지 않게, 반지름 안 표본의 일정 비율 이상이 그 부위일 때만 인정한다.
+  const near = (p, test, radius) => {
+    const R = Math.max(4, Math.round(Math.max(W, H) * radius)), cx = Math.round(p.x), cy = Math.round(p.y);
+    let hit = 0, all = 0;
+    for (let y = cy - R; y <= cy + R; y += 2) for (let x = cx - R; x <= cx + R; x += 2) { all++; if (x >= 0 && y >= 0 && x < W && y < H && test(y * W + x)) hit++; }
+    return hit >= Math.max(3, all * 0.04);
+  };
+  // 다리는 flare 점이 실제 다리에서 조금(2~3등신 아기 악마 무릎은 35px) 벗어나도 받는다: 빈 바탕에 지어낸 다리만 걸러 낸다.
+  const onArt = (p) => !fg || !W || !H || near(p, (i) => fg[i], 0.06);
+  // 부위 지도 번호: 1 머리카락 2 얼굴 3 목 4 상의 5 소매 6 팔 7 하의 8 다리 9 신발 10 기타
+  // 팔 점도 실제 그림에서 30~40px 벗어나곤 한다(아기 악마 어깨). 반지름 5%면 받고, 머리 위에 찍힌 어깨(소매에서 130px)는 거른다.
+  const onPart = (p, ids) => !labels || !W || !H || near(p, (i) => ids.includes(labels[i]), 0.05);
+  const fits = {
+    shoulder: (p) => onPart(p, [3, 4, 5, 6]),
+    elbow: (p) => onPart(p, [4, 5, 6, 10]),
+    wrist: (p) => onPart(p, [4, 5, 6, 10]),
+  };
+  const rejected = [];
   for (const side of ['left', 'right']) {
     const s = ai[`shoulder_${side}`], e = ai[`elbow_${side}`], w = ai[`wrist_${side}`];
+    if (ok(s) && ok(e) && ok(w) && !(fits.shoulder(s) && fits.elbow(e) && fits.wrist(w))) { rejected.push(`arm_${side}`); continue; }
     if (ok(s) && ok(e) && ok(w)) {
       P[`arm_${side}`] = { ...s }; P[`elbow_${side}`] = { ...e }; P[`wrist_${side}`] = { ...w };
       // 손끝: 아래팔 방향으로 아래팔 길이의 45% 더 (원래 손끝이 손목보다 아래팔 쪽에 있으면 다시 잡는다)
@@ -552,7 +572,9 @@ export function applyAiJoints(rig, ai) {
       missing.delete(`arm_${side}`); used.push(`arm_${side}`);
     }
   }
-  const legs = ['left', 'right'].every((side) => ['hip', 'knee', 'ankle'].every((k) => ok(ai[`${k}_${side}`])));
+  const legsGiven = ['left', 'right'].every((side) => ['hip', 'knee', 'ankle'].every((k) => ok(ai[`${k}_${side}`])));
+  const legs = legsGiven && ['left', 'right'].every((side) => ['knee', 'ankle'].every((k) => onArt(ai[`${k}_${side}`])));
+  if (legsGiven && !legs) rejected.push('legs');
   // flare가 양다리 관절을 모두 찾았으면(발목이 엉덩이보다 아래) 전신이다: 2~3등신(머리가 큰) 캐릭터는 골격 분석이 전신이 아니라고 보곤 한다.
   const legsDown = legs && ['left', 'right'].every((side) => ai[`ankle_${side}`].y > ai[`knee_${side}`].y && ai[`knee_${side}`].y > ai[`hip_${side}`].y);
   if (legsDown && rig.frame !== 'full') rig.frame = 'full';
@@ -567,6 +589,10 @@ export function applyAiJoints(rig, ai) {
     for (const side of ['left', 'right']) { const k = P[`knee_${side}`], a = P[`ankle_${side}`], L = Math.hypot(a.x - k.x, a.y - k.y); (rig.ends ??= {})[`foot_tip_${side}`] = { x: a.x, y: a.y + L * 0.15 }; }
     missing.delete('legs'); used.push('legs');
   }
+  // 팔·다리가 모두 그림과 안 맞으면 관절 그림 전체가 원화와 무관한 막대 인형이다: 목도 믿지 않는다.
+  // 목은 턱·머리에 가려 부위 지도로 따지기 어려워 팔·다리 중 하나라도 맞을 때만 받는다(전에는 그냥 받음).
+  if (ok(ai.neck)) { if (used.length || !rejected.length) { P.neck = { ...ai.neck }; used.unshift('neck'); } else rejected.unshift('neck'); }
+  if (rejected.length) rig.aiRejected = rejected;
   if (!used.length) return rig;
   rig.missing = [...missing];
   rig.method = rig.missing.length ? 'partial' : 'skeleton';

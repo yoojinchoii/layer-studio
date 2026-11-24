@@ -45,3 +45,36 @@ test('flare legs make a big-headed (chibi) character full body', () => {
   applyAiJoints(rig, { neck: p(50, 40), hip_left: p(40, 70), knee_left: p(38, 85), ankle_left: p(36, 98), hip_right: p(60, 70), knee_right: p(62, 85), ankle_right: p(64, 98) });
   assert.equal(rig.frame, 'full'); assert.ok(rig.aiJoints.includes('legs')); assert.deepEqual(rig.points.ankle_left, p(36, 98));
 });
+
+test('legs that flare invents on the empty canvas below a half-body picture are ignored', () => {
+  // 100×100 그림의 위 60%만 그림(상반신, 아래는 빈 바탕). flare가 빈 바탕에 무릎·발목을 찍었다.
+  const w = 100, h = 100, fg = new Uint8Array(w * h);
+  for (let y = 0; y < 60; y++) for (let x = 20; x < 80; x++) fg[y * w + x] = 1;
+  const p = (x, y) => ({ x, y }), ai = { neck: p(50, 20), hip_left: p(42, 57), knee_left: p(38, 77), ankle_left: p(34, 97), hip_right: p(58, 57), knee_right: p(62, 77), ankle_right: p(66, 97) };
+  const rig = { frame: 'cut', points: {}, missing: ['legs'] };
+  applyAiJoints(rig, ai, { fg, width: w, height: h });
+  assert.equal(rig.frame, 'cut'); assert.ok(!(rig.aiJoints || []).includes('legs')); assert.ok(!rig.points.ankle_left);
+  // 다리가 실제로 그려져 있으면(2~3등신 전신) 그대로 전신
+  for (let y = 60; y < 100; y++) for (let x = 30; x < 70; x++) fg[y * w + x] = 1;
+  const full = { frame: 'cut', points: {}, missing: ['legs'] };
+  applyAiJoints(full, ai, { fg, width: w, height: h });
+  assert.equal(full.frame, 'full'); assert.ok(full.aiJoints.includes('legs'));
+});
+
+test('arm and neck joints from a generic stick figure that does not sit on the arms are not used', () => {
+  // 부위 지도: 위 40%는 머리카락(1), 그 아래 가운데 상의(4), 양옆 소매(5)·팔(6)
+  const w = 100, h = 100, labels = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) labels[y * w + x] = y < 40 ? 1 : x < 20 ? (y < 55 ? 5 : 6) : x >= 80 ? (y < 55 ? 5 : 6) : 4;
+  const p = (x, y) => ({ x, y });
+  const rig = { frame: 'cut', points: { arm_left: p(15, 45), elbow_left: p(12, 65), wrist_left: p(10, 85) }, missing: [] };
+  // 왼팔: 어깨가 머리카락 한가운데(머리 위) → 버림. 오른팔: 소매·팔 위 → 씀
+  applyAiJoints(rig, { neck: p(50, 10), shoulder_left: p(30, 10), elbow_left: p(12, 60), wrist_left: p(10, 85), shoulder_right: p(85, 45), elbow_right: p(88, 65), wrist_right: p(90, 85) }, { labels, width: w, height: h });
+  assert.deepEqual(rig.points.arm_left, p(15, 45));
+  assert.deepEqual(rig.points.arm_right, p(85, 45));
+  assert.ok(!rig.aiJoints.includes('arm_left') && rig.aiJoints.includes('arm_right') && rig.aiJoints.includes('neck'));
+  assert.deepEqual(rig.aiRejected, ['arm_left']);
+  // 두 팔 다 안 맞으면 목도 버린다
+  const none = { frame: 'cut', points: { neck: p(50, 45) }, missing: [] };
+  applyAiJoints(none, { neck: p(50, 10), shoulder_left: p(30, 10), elbow_left: p(30, 20), wrist_left: p(30, 30), shoulder_right: p(70, 10), elbow_right: p(70, 20), wrist_right: p(70, 30) }, { labels, width: w, height: h });
+  assert.deepEqual(none.points.neck, p(50, 45)); assert.deepEqual(none.aiRejected, ['neck', 'arm_left', 'arm_right']);
+});

@@ -112,7 +112,7 @@ export function runLocalEngine(rgba, width, height, params = {}) {
   const seg = segment(rgba, width, height, { ...params, aiLabels: undefined });
   t.push(performance.now());
   // flare 관절(있으면)이 골격 분석보다 우선: 팔을 굽히거나 다리를 꼰 포즈도 제자리에 잡는다.
-  const rig = applyAiJoints(fitJoints(seg.fg, width, height), params.aiJoints);
+  const rig = applyAiJoints(fitJoints(seg.fg, width, height), params.aiJoints, { fg: seg.fg, labels: params.aiLabels, width, height });
   t.push(performance.now());
   let parts = assignParts(seg, rig);
   // flare 부위 지도가 있으면 의미는 AI, 경계는 색 영역으로 다시 배정한다.
@@ -124,7 +124,8 @@ export function runLocalEngine(rgba, width, height, params = {}) {
   const built = buildLayers(rgba, width, height, seg, rig, parts, { aiFace: params.aiFace });
   t.push(performance.now());
   const names = new Set(built.layers.map((l) => l.name));
-  const frame = frameOf(rig, names, width, height, built.layers);
+  // 사용자가 리깅 구도를 골랐으면 그 구도로 필수 파츠를 검사한다(자동 판별보다 우선).
+  const frame = ['full', 'half', 'bust'].includes(params.frameHint) ? params.frameHint : frameOf(rig, names, width, height, built.layers);
   const pipeline = buildReport({ rig, parts, built, width, height, frame });
   const ms = (a, b) => Math.round(t[b] - t[a]);
   return {

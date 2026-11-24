@@ -33,7 +33,7 @@ export function segmentationPrompt() {
  * AI 지도 RGBA → 범주 번호. 가장 가까운 팔레트 색이 충분히 가까울 때만 받는다(경계의 섞인 색·흰 배경은 0).
  * @param {Uint8ClampedArray} rgba
  */
-export function classifyMap(rgba, n) {
+export function classifyMap(rgba, n, w = 0) {
   const out = new Uint8Array(n);
   for (let i = 0; i < n; i++) {
     const r = rgba[i * 4], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
@@ -45,7 +45,34 @@ export function classifyMap(rgba, n) {
     }
     if (bestD < 90 * 90) out[i] = best;
   }
+  if (w > 0 && n % w === 0) dropStrayTail(out, w, n / w);
   return out;
+}
+
+/**
+ * 꼬리 색(갈색)은 flare가 칠하지 않고 남긴 갈색 눈동자·입술과 가깝다. 꼬리 없는 캐릭터에 눈이 꼬리가 되지 않게,
+ * 작거나(그림의 0.1% 미만) 얼굴에 둘러싸인 꼬리 덩어리는 둘레에서 가장 많은 범주로 바꾼다.
+ */
+export function dropStrayTail(labels, w, h) {
+  const TAIL = 11, FACE = 2, n = w * h, seen = new Uint8Array(n), minArea = Math.max(40, n * 0.001);
+  for (let i0 = 0; i0 < n; i0++) {
+    if (labels[i0] !== TAIL || seen[i0]) continue;
+    const q = [i0], around = new Map();
+    seen[i0] = 1;
+    for (let k = 0; k < q.length; k++) {
+      const i = q[k], x = i % w;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, i >= w ? i - w : -1, i + w < n ? i + w : -1]) {
+        if (j < 0) continue;
+        if (labels[j] === TAIL) { if (!seen[j]) { seen[j] = 1; q.push(j); } } else around.set(labels[j], (around.get(labels[j]) || 0) + 1);
+      }
+    }
+    const edge = [...around.values()].reduce((a, b) => a + b, 0) || 1;
+    if (q.length >= minArea && (around.get(FACE) || 0) / edge < 0.5) continue;
+    let to = 0, most = -1;
+    for (const [k, c] of around) if (k && c > most) { most = c; to = k; }
+    for (const i of q) labels[i] = to;
+  }
+  return labels;
 }
 
 function sideOf(key, x, rig) {

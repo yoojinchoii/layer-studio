@@ -111,7 +111,7 @@ export async function requestPartMap({ token, source, signal }) {
   bctx.imageSmoothingEnabled = false;
   const sx = map.width / size[0], sy = map.height / size[1];
   bctx.drawImage(map, t.ox * sx, t.oy * sy, w * t.s * sx, h * t.s * sy, 0, 0, w, h);
-  return { labels: classifyMap(bctx.getImageData(0, 0, w, h).data, w * h), preview: back };
+  return { labels: classifyMap(bctx.getImageData(0, 0, w, h).data, w * h, w), preview: back };
 }
 
 /**

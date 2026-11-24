@@ -41,3 +41,16 @@ test('tail layer gets its own chain bones, blended weights and a lagging sway', 
   const spec = tailSwaySpec(rig, 4);
   assert.ok(Math.abs(spec.tail_5.rotate(0.3)) !== Math.abs(spec.tail_1.rotate(0.3)));
 });
+
+test('brown eyes that flare left unpainted inside the face do not become a tail', async () => {
+  const { dropStrayTail } = await import('./local-engine/ai-labels.js');
+  const w = 60, h = 60, L = new Uint8Array(w * h).fill(2); // 얼굴
+  for (let y = 20; y < 26; y++) for (let x = 20; x < 26; x++) L[y * w + x] = 11; // 얼굴 안 갈색 눈
+  dropStrayTail(L, w, h);
+  assert.equal(L[22 * w + 22], 2);
+  // 몸 옆으로 길게 뻗은 진짜 꼬리는 남는다
+  const T = new Uint8Array(w * h).fill(4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < 8; x++) T[y * w + x] = 11;
+  dropStrayTail(T, w, h);
+  assert.equal(T[30 * w + 3], 11);
+});
